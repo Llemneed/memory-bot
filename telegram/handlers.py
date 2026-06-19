@@ -32,8 +32,11 @@ async def cmd_start(msg: Message) -> None:
 async def cmd_reset(msg: Message) -> None:
     user_id = msg.from_user.id
 
-    async with await get_db() as db:
+    db = await get_db()
+    try:
         await reset_history(db, user_id=user_id)
+    finally:
+        await db.close()
 
     await msg.answer("История очищена. Начнем заново.")
 
@@ -47,10 +50,13 @@ async def handle_message(msg: Message) -> None:
     user_text = msg.text.strip()
     dialog_id = _dialog_id(user_id)
 
-    async with await get_db() as db:
+    db = await get_db()
+    try:
         await save_message(db, user_id=user_id, dialog_id=dialog_id, role="user", text=user_text)
         retrieved = await retrieve(db, user_id=user_id, query=user_text)
         history = await get_last_n(db, user_id=user_id)
+    finally:
+        await db.close()
 
     memory_block = trim_retrieval_block(build_memory_block(retrieved))
     system_prompt = build_system_prompt(memory_block)
@@ -65,5 +71,8 @@ async def handle_message(msg: Message) -> None:
 
     await msg.answer(answer)
 
-    async with await get_db() as db:
+    db = await get_db()
+    try:
         await save_message(db, user_id=user_id, dialog_id=dialog_id, role="assistant", text=answer)
+    finally:
+        await db.close()
