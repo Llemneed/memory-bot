@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
@@ -12,6 +14,7 @@ from memory.constraints import trim_history, trim_retrieval_block
 from memory.context_builder import build_memory_block
 from memory.retrieval import retrieve
 
+log = logging.getLogger(__name__)
 router = Router()
 
 
@@ -62,7 +65,11 @@ async def handle_message(msg: Message) -> None:
     system_prompt = build_system_prompt(memory_block)
     messages = trim_history([{"role": "system", "content": system_prompt}] + history)
 
-    await msg.bot.send_chat_action(msg.chat.id, "typing")
+    try:
+        await msg.bot.send_chat_action(msg.chat.id, "typing")
+    except Exception as exc:
+        log.warning("send_chat_action failed: %s", exc)
+
     try:
         answer = await complete(messages)
     except RuntimeError as exc:
