@@ -7,6 +7,9 @@ services:
       BOT_TOKEN: ${BOT_TOKEN}
       TELEGRAM_PROXY: ${TELEGRAM_PROXY:-}
       G4F_MODEL: ${G4F_MODEL:-gpt-4o-mini}
+      G4F_PROXY: ${G4F_PROXY:-}
+      G4F_PROVIDER_ORDER: ${G4F_PROVIDER_ORDER:-PollinationsAI,DeepInfra,HuggingChat,You,Auto}
+      G4F_WEB_SEARCH: ${G4F_WEB_SEARCH:-false}
       LLM_TIMEOUT: ${LLM_TIMEOUT:-60}
       LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-5}
       HISTORY_LAST_N: ${HISTORY_LAST_N:-10}

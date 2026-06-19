@@ -23,10 +23,15 @@ def trim_history(messages: list[dict]) -> list[dict]:
 
     system = [m for m in messages if m["role"] == "system"]
     rest = [m for m in messages if m["role"] != "system"]
+    if not rest:
+        return system
 
-    total = 0
-    kept: list[dict] = []
-    for msg in reversed(rest):
+    # Always keep the latest non-system message so the current user request
+    # never disappears from context even when the conversation gets long.
+    kept = [rest[-1]]
+    total = len(rest[-1].get("content", ""))
+
+    for msg in reversed(rest[:-1]):
         size = len(msg.get("content", ""))
         if total + size > _MAX_HISTORY_CHARS:
             break

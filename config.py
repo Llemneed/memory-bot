@@ -11,6 +11,9 @@ class Settings(BaseSettings):
 
     # LLM
     G4F_MODEL: str = "gpt-4o-mini"
+    G4F_PROXY: str = ""
+    G4F_PROVIDER_ORDER: str = "PollinationsAI,DeepInfra,HuggingChat,You,Auto"
+    G4F_WEB_SEARCH: bool = False
     LLM_TIMEOUT: int = 60          # секунд на один запрос к провайдеру
     LLM_MAX_RETRIES: int = 5       # сколько провайдеров пробовать
 

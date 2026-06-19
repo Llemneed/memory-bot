@@ -8,8 +8,14 @@ import aiosqlite
 
 from config import settings
 
-_FIRST_PERSON_PREFIX = re.compile(r"^\s*(я|у меня|мой|моя|моё|мои|меня)\b", re.IGNORECASE)
-_QUESTION_PREFIX = re.compile(r"^\s*(как|какой|какая|какие|где|когда|почему|зачем|кто|что|ли)\b", re.IGNORECASE)
+_FIRST_PERSON_PREFIX = re.compile(
+    r"^\s*(я|у меня|мой|моя|моё|мои|меня)\b",
+    re.IGNORECASE,
+)
+_QUESTION_PREFIX = re.compile(
+    r"^\s*(как|какой|какая|какие|где|когда|почему|зачем|кто|что|ли)\b",
+    re.IGNORECASE,
+)
 _SCHEDULE_VALUE = re.compile(
     r"\b\d{1,2}\s*/\s*\d{1,2}\b|\bмесяц\s+на\s+месяц\b|\bнедел\w+\s+через\s+\w+\b",
     re.IGNORECASE,
@@ -26,8 +32,13 @@ _MY_IS = re.compile(
     re.IGNORECASE,
 )
 _I_AM = re.compile(r"^я\s+(?P<value>[^.!?\n]+)$", re.IGNORECASE)
+_VERB_ENDING = r"(?:ю|у|усь|юсь|аю|яю|уся|юсья|ем|им|аюсь|яюсь)"
 _VERB_PREDICATE = re.compile(
-    r"^я\s+(?P<verb>[а-яёa-z-]+(?:ю|у|усь|юсь|аю|яю|уся|юсья|ем|им|аюсь|яюсь|аюсь))\s+(?P<value>[^.!?\n]+)$",
+    rf"^я\s+(?P<verb>[а-яёa-z-]+{_VERB_ENDING})\s+(?P<value>[^.!?\n]+)$",
+    re.IGNORECASE,
+)
+_BARE_VERB_PREDICATE = re.compile(
+    rf"^(?P<verb>[а-яёa-z-]+{_VERB_ENDING})\s+(?P<value>[^.!?\n]+)$",
     re.IGNORECASE,
 )
 _STOPWORDS = {
@@ -183,10 +194,10 @@ def build_fact_block(facts: list[dict[str, Any]]) -> str:
     if not facts:
         return ""
 
-    lines = ["=== Подтвержденные факты ==="]
+    lines = ["=== Confirmed facts ==="]
     for fact in facts:
         lines.append(f"- [{fact['category']}] {fact['key']}: {fact['value']}")
-    lines.append("=== Конец фактов ===")
+    lines.append("=== End facts ===")
     return "\n".join(lines)
 
 
@@ -195,7 +206,11 @@ def _looks_like_question(text: str) -> bool:
 
 
 def _looks_memory_worthy(text: str) -> bool:
-    return _FIRST_PERSON_PREFIX.search(text) is not None or _PREFERENCE.match(text) is not None
+    return (
+        _FIRST_PERSON_PREFIX.search(text) is not None
+        or _PREFERENCE.match(text) is not None
+        or _BARE_VERB_PREDICATE.match(text) is not None
+    )
 
 
 def _extract_name(text: str) -> FactCandidate | None:
@@ -247,7 +262,11 @@ def _extract_possession(text: str) -> FactCandidate | None:
         if key:
             return FactCandidate(category="attribute", key=key, value=value)
 
-    return FactCandidate(category="attribute", key=_normalize_key(tokens[0]), value=" ".join(tokens[1:]) or "есть")
+    return FactCandidate(
+        category="attribute",
+        key=_normalize_key(tokens[0]),
+        value=" ".join(tokens[1:]) or "есть",
+    )
 
 
 def _extract_my_is(text: str) -> FactCandidate | None:
@@ -264,7 +283,7 @@ def _extract_my_is(text: str) -> FactCandidate | None:
 
 
 def _extract_predicate(text: str) -> FactCandidate | None:
-    match = _VERB_PREDICATE.match(text)
+    match = _VERB_PREDICATE.match(text) or _BARE_VERB_PREDICATE.match(text)
     if not match:
         return None
 
