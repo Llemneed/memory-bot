@@ -13,6 +13,7 @@ from typing import Any
 import aiosqlite
 
 from config import settings
+from dialogs.history import normalize_message_text
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ async def retrieve(
     user_id: int,
     query: str,
     top_k: int | None = None,
+    exclude_text: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Возвращает top_k релевантных сообщений из истории пользователя.
@@ -41,6 +43,7 @@ async def retrieve(
     """
     k = top_k or settings.RETRIEVAL_TOP_K
     fts_query = _sanitize_query(query)
+    excluded_normalized = normalize_message_text(exclude_text or "")
 
     if not fts_query:
         return []
@@ -54,10 +57,11 @@ async def retrieve(
             JOIN messages m ON m.id = fts_messages.rowid
             WHERE fts_messages MATCH ?
               AND m.user_id = ?
+              AND (? = '' OR m.normalized_text <> ?)
             ORDER BY score
             LIMIT ?
             """,
-            (fts_query, user_id, k),
+            (fts_query, user_id, excluded_normalized, excluded_normalized, k),
         ) as cur:
             rows = await cur.fetchall()
         return [{"role": r[0], "text": r[1], "created_at": r[2], "score": r[3]} for r in rows]

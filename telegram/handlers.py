@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
+from config import settings
 from database.sqlite import get_db
-from dialogs.history import get_last_n, reset_history, save_message
+from dialogs.history import get_last_n, normalize_message_text, reset_history, save_message
 from llm.g4f_client import complete
 from llm.prompts import build_system_prompt
 from memory.constraints import trim_history, trim_retrieval_block
 from memory.context_builder import build_memory_block
+from memory.facts import build_fact_block, retrieve_facts, upsert_extracted_facts
 from memory.retrieval import retrieve
 
 log = logging.getLogger(__name__)
@@ -20,10 +23,33 @@ router = Router()
 
 SEND_RETRY_COUNT = 3
 SEND_RETRY_DELAY_SECONDS = 2
+RECENT_INPUTS: dict[tuple[int, str], float] = {}
+RECENT_INPUTS_LOCK = asyncio.Lock()
 
 
 def _dialog_id(user_id: int) -> str:
     return f"dialog_{user_id}"
+
+
+async def should_drop_burst_duplicate(user_id: int, text: str) -> bool:
+    normalized = normalize_message_text(text)
+    if not normalized:
+        return True
+
+    now = time.monotonic()
+    async with RECENT_INPUTS_LOCK:
+        stale_before = now - settings.MESSAGE_BURST_DEDUP_SECONDS
+        stale_keys = [key for key, ts in RECENT_INPUTS.items() if ts < stale_before]
+        for key in stale_keys:
+            RECENT_INPUTS.pop(key, None)
+
+        key = (user_id, normalized)
+        last_seen = RECENT_INPUTS.get(key)
+        if last_seen is not None and now - last_seen < settings.MESSAGE_BURST_DEDUP_SECONDS:
+            return True
+
+        RECENT_INPUTS[key] = now
+        return False
 
 
 async def safe_answer(msg: Message, text: str) -> bool:
@@ -70,17 +96,45 @@ async def handle_message(msg: Message) -> None:
     user_text = msg.text.strip()
     dialog_id = _dialog_id(user_id)
 
+    if await should_drop_burst_duplicate(user_id, user_text):
+        log.info("Dropped burst duplicate for user=%s text=%r", user_id, user_text[:80])
+        return
+
     db = await get_db()
     try:
-        await save_message(db, user_id=user_id, dialog_id=dialog_id, role="user", text=user_text)
-        retrieved = await retrieve(db, user_id=user_id, query=user_text)
+        fact_hits = await retrieve_facts(db, user_id=user_id, dialog_id=dialog_id, query=user_text)
+        retrieved = await retrieve(db, user_id=user_id, query=user_text, exclude_text=user_text)
         history = await get_last_n(db, user_id=user_id)
     finally:
         await db.close()
 
-    memory_block = trim_retrieval_block(build_memory_block(retrieved))
+    db = await get_db()
+    try:
+        user_message_id = await save_message(db, user_id=user_id, dialog_id=dialog_id, role="user", text=user_text)
+        extracted_facts = await upsert_extracted_facts(
+            db,
+            user_id=user_id,
+            dialog_id=dialog_id,
+            text=user_text,
+            source_message_id=user_message_id,
+        )
+    finally:
+        await db.close()
+
+    if user_message_id is None:
+        log.info("Skipped duplicate history write for user=%s text=%r", user_id, user_text[:80])
+
+    if extracted_facts:
+        log.info("Extracted %d fact(s) from user=%s", len(extracted_facts), user_id)
+
+    memory_parts = [build_fact_block(fact_hits), build_memory_block(retrieved)]
+    memory_block = trim_retrieval_block("\n\n".join(part for part in memory_parts if part))
     system_prompt = build_system_prompt(memory_block)
-    messages = trim_history([{"role": "system", "content": system_prompt}] + history)
+    messages = trim_history(
+        [{"role": "system", "content": system_prompt}] +
+        history +
+        [{"role": "user", "content": user_text}]
+    )
 
     try:
         await msg.bot.send_chat_action(msg.chat.id, "typing")

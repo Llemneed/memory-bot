@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 import aiosqlite
@@ -10,6 +11,10 @@ from config import settings
 WRITE_LOCK = asyncio.Lock()
 
 
+def normalize_message_text(text: str) -> str:
+    return " ".join(text.split()).strip().lower()
+
+
 async def save_message(
     db: aiosqlite.Connection,
     *,
@@ -17,13 +22,37 @@ async def save_message(
     dialog_id: str,
     role: str,
     text: str,
-) -> None:
+) -> int | None:
+    normalized_text = normalize_message_text(text)
     async with WRITE_LOCK:
-        await db.execute(
-            "INSERT INTO messages (user_id, dialog_id, role, text) VALUES (?,?,?,?)",
-            (user_id, dialog_id, role, text),
+        if settings.MESSAGE_STORAGE_DEDUP_SECONDS > 0:
+            cutoff = time.time() - settings.MESSAGE_STORAGE_DEDUP_SECONDS
+            async with db.execute(
+                """
+                SELECT 1
+                FROM messages
+                WHERE user_id = ?
+                  AND dialog_id = ?
+                  AND role = ?
+                  AND normalized_text = ?
+                  AND created_at >= ?
+                LIMIT 1
+                """,
+                (user_id, dialog_id, role, normalized_text, cutoff),
+            ) as cur:
+                duplicate = await cur.fetchone()
+            if duplicate:
+                return None
+
+        cur = await db.execute(
+            """
+            INSERT INTO messages (user_id, dialog_id, role, text, normalized_text)
+            VALUES (?,?,?,?,?)
+            """,
+            (user_id, dialog_id, role, text, normalized_text),
         )
         await db.commit()
+    return cur.lastrowid
 
 
 async def reset_history(
@@ -33,6 +62,7 @@ async def reset_history(
 ) -> None:
     async with WRITE_LOCK:
         await db.execute("DELETE FROM messages WHERE user_id = ?", (user_id,))
+        await db.execute("DELETE FROM facts WHERE user_id = ?", (user_id,))
         await db.execute("INSERT INTO fts_messages(fts_messages) VALUES('rebuild')")
         await db.commit()
 
