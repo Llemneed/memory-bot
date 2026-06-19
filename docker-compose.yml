@@ -1,0 +1,16 @@
+services:
+  bot:
+    build: .
+    container_name: memory-bot
+    restart: unless-stopped
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      G4F_MODEL: ${G4F_MODEL:-gpt-4o-mini}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-60}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-5}
+      HISTORY_LAST_N: ${HISTORY_LAST_N:-10}
+      RETRIEVAL_TOP_K: ${RETRIEVAL_TOP_K:-5}
+      MAX_CONTEXT_CHARS: ${MAX_CONTEXT_CHARS:-6000}
+      DB_PATH: ${DB_PATH:-database/sqlite.db}
+    volumes:
+      - ./database:/app/database
