@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     environment:
       BOT_TOKEN: ${BOT_TOKEN}
+      TELEGRAM_PROXY: ${TELEGRAM_PROXY:-}
       G4F_MODEL: ${G4F_MODEL:-gpt-4o-mini}
       LLM_TIMEOUT: ${LLM_TIMEOUT:-60}
       LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-5}
@@ -14,3 +15,5 @@ services:
       DB_PATH: ${DB_PATH:-database/sqlite.db}
     volumes:
       - ./database:/app/database
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

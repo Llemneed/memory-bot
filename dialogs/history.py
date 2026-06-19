@@ -1,19 +1,13 @@
-"""
-Управление историей диалога (short-term memory).
-
-Хранит последние N сообщений в БД и отдаёт их
-в формате [{role, content}] для LLM.
-"""
 from __future__ import annotations
 
-import logging
+import asyncio
 from typing import Any
 
 import aiosqlite
 
 from config import settings
 
-log = logging.getLogger(__name__)
+WRITE_LOCK = asyncio.Lock()
 
 
 async def save_message(
@@ -24,11 +18,23 @@ async def save_message(
     role: str,
     text: str,
 ) -> None:
-    await db.execute(
-        "INSERT INTO messages (user_id, dialog_id, role, text) VALUES (?,?,?,?)",
-        (user_id, dialog_id, role, text),
-    )
-    await db.commit()
+    async with WRITE_LOCK:
+        await db.execute(
+            "INSERT INTO messages (user_id, dialog_id, role, text) VALUES (?,?,?,?)",
+            (user_id, dialog_id, role, text),
+        )
+        await db.commit()
+
+
+async def reset_history(
+    db: aiosqlite.Connection,
+    *,
+    user_id: int,
+) -> None:
+    async with WRITE_LOCK:
+        await db.execute("DELETE FROM messages WHERE user_id = ?", (user_id,))
+        await db.execute("INSERT INTO fts_messages(fts_messages) VALUES('rebuild')")
+        await db.commit()
 
 
 async def get_last_n(
@@ -37,7 +43,6 @@ async def get_last_n(
     user_id: int,
     n: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Возвращает последние n сообщений пользователя в формате [{role, content}]."""
     limit = n or settings.HISTORY_LAST_N
     async with db.execute(
         """
@@ -50,5 +55,4 @@ async def get_last_n(
     ) as cur:
         rows = await cur.fetchall()
 
-    # Разворачиваем: БД отдаёт от новых к старым, LLM нужно от старых к новым
-    return [{"role": r["role"], "content": r["text"]} for r in reversed(rows)]
+    return [{"role": row["role"], "content": row["text"]} for row in reversed(rows)]

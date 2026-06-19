@@ -13,6 +13,8 @@ import aiosqlite
 
 from config import settings
 
+SQLITE_BUSY_TIMEOUT_MS = 5000
+
 CREATE_MESSAGES = """
 CREATE TABLE IF NOT EXISTS messages (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,7 +35,8 @@ USING fts5(
     dialog_id UNINDEXED,
     created_at UNINDEXED,
     content='messages',
-    content_rowid='id'
+    content_rowid='id',
+    tokenize='unicode61'
 );
 """
 
@@ -63,6 +66,7 @@ async def get_db() -> aiosqlite.Connection:
     db = await aiosqlite.connect(settings.DB_PATH)
     await db.execute("PRAGMA journal_mode=WAL")
     await db.execute("PRAGMA foreign_keys=ON")
+    await db.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
     db.row_factory = aiosqlite.Row
     return db
 
@@ -71,5 +75,6 @@ async def init_db() -> None:
     Path(settings.DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(settings.DB_PATH) as db:
         await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
         await db.executescript(CREATE_MESSAGES + CREATE_FTS + CREATE_TRIGGERS)
         await db.commit()

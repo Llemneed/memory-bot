@@ -60,7 +60,7 @@ async def retrieve(
             (fts_query, user_id, k),
         ) as cur:
             rows = await cur.fetchall()
-        return [dict(r) for r in rows]
+        return [{"role": r[0], "text": r[1], "created_at": r[2], "score": r[3]} for r in rows]
     except aiosqlite.OperationalError as e:
         log.warning("FTS retrieval failed: %s", e)
         return []
