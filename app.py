@@ -6,6 +6,7 @@ import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import settings
@@ -18,6 +19,8 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 log = logging.getLogger(__name__)
+
+STARTUP_RETRY_DELAY_SECONDS = 10
 
 
 def build_session() -> AiohttpSession | None:
@@ -37,8 +40,25 @@ async def main() -> None:
     dp.message.middleware(LoggingMiddleware())
     dp.include_router(router)
 
-    log.info("Bot started")
-    await dp.start_polling(bot, allowed_updates=["message"])
+    while True:
+        try:
+            log.info("Bot started")
+            await dp.start_polling(bot, allowed_updates=["message"])
+            return
+        except TelegramAPIError as exc:
+            log.warning(
+                "Polling failed due to Telegram API/proxy error: %s. Retrying in %ss",
+                exc,
+                STARTUP_RETRY_DELAY_SECONDS,
+            )
+            await asyncio.sleep(STARTUP_RETRY_DELAY_SECONDS)
+        except Exception as exc:
+            log.warning(
+                "Polling failed due to unexpected startup/runtime error: %s. Retrying in %ss",
+                exc,
+                STARTUP_RETRY_DELAY_SECONDS,
+            )
+            await asyncio.sleep(STARTUP_RETRY_DELAY_SECONDS)
 
 
 if __name__ == "__main__":

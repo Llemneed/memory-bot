@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from aiogram import Router
@@ -17,17 +18,33 @@ from memory.retrieval import retrieve
 log = logging.getLogger(__name__)
 router = Router()
 
+SEND_RETRY_COUNT = 3
+SEND_RETRY_DELAY_SECONDS = 2
+
 
 def _dialog_id(user_id: int) -> str:
     return f"dialog_{user_id}"
 
 
+async def safe_answer(msg: Message, text: str) -> bool:
+    for attempt in range(1, SEND_RETRY_COUNT + 1):
+        try:
+            await msg.answer(text)
+            return True
+        except Exception as exc:
+            log.warning("msg.answer failed on attempt %d/%d: %s", attempt, SEND_RETRY_COUNT, exc)
+            if attempt < SEND_RETRY_COUNT:
+                await asyncio.sleep(SEND_RETRY_DELAY_SECONDS)
+    return False
+
+
 @router.message(CommandStart())
 async def cmd_start(msg: Message) -> None:
-    await msg.answer(
+    await safe_answer(
+        msg,
         "Привет! Я запоминаю наши разговоры и использую их в контексте.\n"
         "Просто напиши что-нибудь.\n\n"
-        "/reset - очистить историю"
+        "/reset - очистить историю",
     )
 
 
@@ -41,7 +58,7 @@ async def cmd_reset(msg: Message) -> None:
     finally:
         await db.close()
 
-    await msg.answer("История очищена. Начнем заново.")
+    await safe_answer(msg, "История очищена. Начнем заново.")
 
 
 @router.message()
@@ -73,10 +90,12 @@ async def handle_message(msg: Message) -> None:
     try:
         answer = await complete(messages)
     except RuntimeError as exc:
-        await msg.answer(f"⚠️ {exc}")
+        await safe_answer(msg, f"⚠️ {exc}")
         return
 
-    await msg.answer(answer)
+    if not await safe_answer(msg, answer):
+        log.warning("Failed to deliver assistant response to user=%s", user_id)
+        return
 
     db = await get_db()
     try:
