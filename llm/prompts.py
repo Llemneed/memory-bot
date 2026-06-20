@@ -80,6 +80,7 @@ Fact-based answer mode:
 - If one detail is known and another is missing, say both plainly without guessing.
 - Do not answer with headings plus bullet points unless the user explicitly asked for a list.
 - Do not sound like you are reading database fields aloud.
+- If the fact says that day and night alternate by watches, keep the word "вахта" and do not rewrite that into "смены чередуются".
 
 Bad:
 "Подтверждено:

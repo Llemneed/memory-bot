@@ -9,6 +9,8 @@ def maybe_build_fact_answer(query: str, facts: list[dict]) -> str | None:
 
     query_tokens = set(_query_tokens(query))
     query_text = _normalize_text(query)
+    if not _looks_like_fact_request(query_text, query_tokens):
+        return None
     fact_map = _fact_map(facts)
 
     asks_where = "где" in query_tokens
@@ -115,18 +117,28 @@ def maybe_build_fact_answer(query: str, facts: list[dict]) -> str | None:
 def _fact_map(facts: list[dict]) -> dict[str, str]:
     result: dict[str, str] = {}
     for fact in facts:
-        key = _canonical_fact_key(str(fact.get("key", "")))
+        key = _canonical_fact_key(str(fact.get("key", "")), str(fact.get("value", "")))
         value = str(fact.get("value", "")).strip()
         if key and value and key not in result:
             result[key] = value
     return result
 
 
-def _canonical_fact_key(key: str) -> str:
+def _canonical_fact_key(key: str, value: str = "") -> str:
     if key.endswith(":role"):
         return "роль"
     if key.endswith(":place"):
         return "место_работы"
+    normalized_value = _normalize_text(value)
+    if key in {"смена", "смены"}:
+        return "график"
+    if key == "режим" and "смен" in normalized_value and re.search(r"\b\d{1,2}\s+час", normalized_value):
+        return "график"
+    if key == "вахты":
+        if "черед" in normalized_value or ("день" in normalized_value and "ноч" in normalized_value):
+            return "одна вахта"
+        if any(marker in normalized_value for marker in ("месяц", "дней", "дня", "день")):
+            return "вахта"
     return key
 
 
@@ -140,6 +152,16 @@ def _query_tokens(query: str) -> list[str]:
 
 def _has_prefix(tokens: set[str], prefix: str) -> bool:
     return any(token.startswith(prefix) for token in tokens)
+
+
+def _looks_like_fact_request(query_text: str, query_tokens: set[str]) -> bool:
+    if "?" in query_text:
+        return True
+    if query_text.startswith(("напомни", "скажи", "подскажи", "расскажи", "уточни")):
+        return True
+    if query_tokens & {"кто", "что", "где", "когда", "почему", "зачем", "кем", "чем", "какой", "какая", "какие", "каким"}:
+        return True
+    return False
 
 
 def _role_nominative(value: str) -> str:

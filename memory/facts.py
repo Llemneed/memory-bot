@@ -281,10 +281,48 @@ def build_fact_answer_block(facts: list[dict[str, Any]]) -> str:
         return ""
 
     lines = ["=== Facts for this answer ==="]
-    for fact in facts:
-        lines.append(f"- {_fact_label_for_display(fact['key'])}: {fact['value']}")
+    for fact in _prepare_fact_answer_facts(facts):
+        display_key = fact.get("_display_key") or fact["key"]
+        lines.append(f"- {_fact_label_for_display(str(display_key))}: {fact['value']}")
     lines.append("=== End answer facts ===")
     return "\n".join(lines)
+
+
+def _prepare_fact_answer_facts(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not facts:
+        return []
+
+    identities = [_fact_answer_identity(fact) for fact in facts]
+    has_shift_duration = "график" in identities
+    prepared: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for fact, identity in zip(facts, identities):
+        if identity == "режим" and has_shift_duration:
+            continue
+        if identity in seen:
+            continue
+        seen.add(identity)
+        prepared.append({**fact, "_display_key": identity})
+
+    return prepared
+
+
+def _fact_answer_identity(fact: dict[str, Any]) -> str:
+    key = _canonical_fact_key(str(fact.get("key", "")))
+    value = normalize_fact_text(str(fact.get("value", "")))
+
+    if key == "вахты":
+        if "черед" in value or ("день" in value and "ноч" in value):
+            return "одна вахта"
+        if any(marker in value for marker in ("месяц", "дней", "дня", "день")):
+            return "вахта"
+    if key in {"смена", "смены"}:
+        return "график"
+    if key == "режим" and "смен" in value and re.search(r"\b\d{1,2}\s+час", value):
+        return "график"
+
+    return key
 
 
 def _fact_label_for_display(key: str) -> str:
@@ -296,9 +334,9 @@ def _fact_label_for_display(key: str) -> str:
         "живу": "место проживания",
         "место работы": "место работы",
         "вахта": "длительность вахты",
-        "график": "длительность смены",
+        "график": "длительность одной смены",
         "режим": "режим / правило",
-        "одна вахта": "чередование вахт",
+        "одна вахта": "чередуются именно вахты",
         "завтрак с": "расписание питания",
         "у меня": "режим",
     }
@@ -668,6 +706,8 @@ def _canonical_fact_key(key: str) -> str:
         return "роль"
     if key.endswith(":place"):
         return "место работы"
+    if key in {"смена", "смены"}:
+        return "график"
     return key
 
 
