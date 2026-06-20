@@ -40,6 +40,7 @@ Conversation behavior:
   - day shift / night shift alternation describes intra-cycle shift rotation, not automatically month-by-month rotation.
   - if both facts appear, "month-on-month" describes the overall rota cycle, while "day/night" describes the shift pattern inside that cycle.
   - if a fact explicitly says one watch block is day and another watch block is night, keep that wording and do not silently rewrite it as shift alternation.
+  - if the facts say the watch duration is a month and one watch is day while another watch is night, that means whole month-long watch blocks alternate; do not rewrite it as day-by-day alternation.
   - place of living / location is separate from profession and separate from schedule.
 """
 

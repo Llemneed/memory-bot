@@ -159,6 +159,7 @@ async def handle_message(msg: Message) -> None:
         history = await get_last_n(
             db,
             user_id=user_id,
+            n=4,
             include_assistant=False,
             include_questions=False,
         )
@@ -184,7 +185,11 @@ async def handle_message(msg: Message) -> None:
     if extracted_facts:
         log.info("Extracted %d fact(s) from user=%s", len(extracted_facts), user_id)
 
-    memory_parts = [build_fact_block(fact_hits), build_memory_block(retrieved)]
+    raw_memory_block = ""
+    if len(fact_hits) < 3:
+        raw_memory_block = build_memory_block(retrieved)
+
+    memory_parts = [build_fact_block(fact_hits), raw_memory_block]
     memory_block = trim_retrieval_block("\n\n".join(part for part in memory_parts if part))
     system_prompt = build_system_prompt(memory_block)
     messages = trim_history(
