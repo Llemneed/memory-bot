@@ -13,7 +13,7 @@ _FIRST_PERSON_PREFIX = re.compile(
     re.IGNORECASE,
 )
 _QUESTION_PREFIX = re.compile(
-    r"^\s*(как|какой|какая|какие|где|когда|почему|зачем|кто|что|ли)\b",
+    r"^\s*((?:по|на|в)\s+)?(как|какой|какая|какие|какому|какой|каких|каким|где|когда|почему|зачем|кто|что|ли|кем|чем|сколько)\b",
     re.IGNORECASE,
 )
 _DISCOURSE_PREFIX = re.compile(
@@ -73,6 +73,9 @@ _STOPWORDS = {
     "как",
     "и",
     "а",
+    "с",
+    "до",
+    "от",
 }
 
 
@@ -96,14 +99,16 @@ def extract_facts(text: str) -> list[FactCandidate]:
 
     seen: dict[tuple[str, str], FactCandidate] = {}
     for clause in _iter_candidate_clauses(source):
-        normalized = normalize_fact_text(clause)
+        raw_clause = clause.strip()
+        normalized = normalize_fact_text(raw_clause)
         if not normalized or _looks_like_question(normalized):
             continue
 
-        cleaned_clause = _strip_discourse_prefix(clause)
+        cleaned_clause = _strip_discourse_prefix(raw_clause)
         normalized_cleaned = normalize_fact_text(cleaned_clause)
         if not normalized_cleaned or _looks_like_question(normalized_cleaned):
             continue
+        cleaned_clause = cleaned_clause.strip(" ,.!?;")
         if not _looks_memory_worthy(normalized_cleaned):
             continue
 
@@ -241,7 +246,11 @@ def _extract_clause_facts(text: str) -> list[FactCandidate | None]:
 
 
 def _iter_candidate_clauses(text: str) -> list[str]:
-    parts = [part.strip(" ,") for part in re.split(r"[.!?;\n]+", text) if part.strip(" ,")]
+    parts = [
+        part.strip()
+        for part in re.findall(r"[^.!?;\n]+[.!?;\n]*", text)
+        if part.strip(" ,.!?;\n")
+    ]
     return parts or [text.strip()]
 
 
@@ -372,7 +381,7 @@ def _extract_predicate(text: str) -> FactCandidate | None:
     category = "state" if _looks_like_temporal_state(value) else "attribute"
     key = verb
     if category == "attribute" and _looks_like_role(value):
-        key = f"{verb}:role"
+        key = "роль"
     elif category == "attribute" and _looks_like_location_phrase(value):
         key = f"{verb}:place"
 
@@ -461,6 +470,8 @@ def _looks_like_topic_value(text: str) -> bool:
     key = _normalize_key(match.group("key"))
     value = _cleanup_value(match.group("value"))
     if not key or not value:
+        return False
+    if len(key) <= 1:
         return False
     if key in {"день", "дни", "месяц", "месяцы", "час", "часы", "число", "числа"}:
         return False
