@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "project": "memory-bot",
+  "branch": "main",
+  "repo_path_local": "C:/Users/user/Documents/New project 2/memory-bot",
+  "repo_path_server": "~/memory-bot",
+  "server": {
+    "host": "176.109.107.155",
+    "user": "lemneed"
+  },
+  "roles": {
+    "planner": "Claude",
+    "executor": "Codex"
+  },
+  "protocol": {
+    "board_file": "coordination/connect.md",
+    "log_file": "coordination/log.jsonl",
+    "prompt_file": "coordination/claude_prompt.md",
+    "single_writer_per_scope": true,
+    "read_board_before_edit": true,
+    "append_log_after_action": true
+  },
+  "state": {
+    "status": "idle",
+    "active_task_id": null,
+    "active_owner": null,
+    "last_known_deployed_commit": "0e8c10b"
+  }
+}
