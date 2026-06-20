@@ -34,64 +34,61 @@ def maybe_build_fact_answer(query: str, facts: list[dict]) -> str | None:
 
     if asks_role and fact_map.get("роль"):
         if "профессия" in query_tokens or "должность" in query_tokens:
-            return f"Ваша профессия — {_role_nominative(fact_map['роль'])}."
-        return f"Вы работаете {fact_map['роль']}."
+            return f"По профессии ты {_role_nominative(fact_map['роль'])}."
+        return f"Работаешь {fact_map['роль']}."
 
     if asks_work_place:
-        lines: list[str] = []
+        parts: list[str] = []
         if fact_map.get("живу"):
-            lines.append(f"Отдельно место работы не указано. Есть только место проживания: {_place_sentence_tail(fact_map['живу'])}.")
+            parts.append(f"Отдельно место работы ты не называл. Точно знаю только, что живешь {_place_tail(fact_map['живу'])}.")
         else:
-            lines.append("Место работы отдельно не указано.")
-        if fact_map.get("роль"):
-            lines.append(f"По профессии вы {_role_nominative(fact_map['роль'])}.")
-        return "\n".join(lines)
+            parts.append("Отдельно место работы ты не называл.")
+        return " ".join(parts)
 
     if asks_why_day_night and fact_map.get("вахта") and fact_map.get("одна вахта"):
-        lines = ["Коротко по твоим данным:"]
-        lines.append(_watch_duration_sentence(fact_map["вахта"]))
-        lines.append(_watch_alternation_sentence(fact_map["одна вахта"]))
-        lines.append("То есть у тебя чередуются именно вахты месячными блоками, а не 12-часовые смены внутри суток.")
+        parts = [
+            "Потому что у тебя чередуются не смены внутри суток, а сами вахты: "
+            f"{_watch_alternation_clause(fact_map['одна вахта'])}."
+        ]
+        parts.append(_watch_duration_sentence(fact_map["вахта"]))
         if fact_map.get("график"):
-            lines.append(_shift_duration_sentence(fact_map["график"]))
+            parts.append(_shift_duration_sentence(fact_map["график"]))
         elif fact_map.get("режим"):
-            lines.append(_shift_duration_sentence(fact_map["режим"]))
-        return "\n".join(f"- {line}" if index else line for index, line in enumerate(lines))
+            parts.append(_shift_duration_sentence(fact_map["режим"]))
+        return " ".join(parts)
 
     if asks_method or asks_place or mentions_food:
         if asks_place and not asks_method and not mentions_food and fact_map.get("живу"):
             return _place_sentence(fact_map["живу"])
 
-        lines: list[str] = ["Коротко по твоим данным:"]
+        parts: list[str] = []
 
         if asks_method:
             if fact_map.get("работаю"):
-                lines.append(_watch_cycle_sentence(fact_map["работаю"]))
+                parts.append(_watch_cycle_sentence(fact_map["работаю"]))
             if fact_map.get("вахта"):
-                lines.append(_watch_duration_sentence(fact_map["вахта"]))
+                parts.append(_watch_duration_sentence(fact_map["вахта"]))
             if fact_map.get("одна вахта"):
-                lines.append(_watch_alternation_sentence(fact_map["одна вахта"]))
+                parts.append(_watch_alternation_sentence(fact_map["одна вахта"]))
             if fact_map.get("график"):
-                lines.append(_shift_duration_sentence(fact_map["график"]))
+                parts.append(_shift_duration_sentence(fact_map["график"]))
             elif fact_map.get("режим"):
-                lines.append(_shift_duration_sentence(fact_map["режим"]))
+                parts.append(_shift_duration_sentence(fact_map["режим"]))
 
         if asks_place and fact_map.get("живу"):
-            lines.append(_place_sentence(fact_map["живу"]))
+            parts.append(_place_sentence(fact_map["живу"]))
 
         if mentions_food and fact_map.get("завтрак с"):
-            lines.append(_food_sentence(fact_map["завтрак с"]))
+            parts.append(_food_sentence(fact_map["завтрак с"]))
             if "ужин" in query_tokens and any(token.startswith("ночн") for token in query_tokens):
-                lines.append("В ночную смену ужин 19:00-20:00 не входит в рабочее время.")
+                parts.append("В ночную смену ужин с 19:00 до 20:00 уже не попадает в рабочее время.")
 
-        compact = [line for line in lines if line]
-        if len(compact) == 1 and compact[0] == "Коротко по твоим данным:":
-            return None
-        return "\n".join(f"- {line}" if index else line for index, line in enumerate(compact))
+        if parts:
+            return " ".join(parts)
 
     if query_text == "это место проживания":
         if fact_map.get("живу"):
-            return f"Понял. Место проживания: {_place_sentence_tail(fact_map['живу'])}."
+            return f"Понял, это место проживания: {_place_tail(fact_map['живу'])}."
         return "Понял."
 
     return None
@@ -136,10 +133,10 @@ def _role_nominative(value: str) -> str:
 
 
 def _place_sentence(value: str) -> str:
-    return f"Вы живете {_place_sentence_tail(value)}."
+    return f"Живешь {_place_tail(value)}."
 
 
-def _place_sentence_tail(value: str) -> str:
+def _place_tail(value: str) -> str:
     cleaned = value.replace(", ", " ").strip()
     lowered = cleaned.lower()
     if lowered.startswith(("в ", "на ", "у ", "из ", "под ")):
@@ -148,27 +145,37 @@ def _place_sentence_tail(value: str) -> str:
 
 
 def _watch_cycle_sentence(value: str) -> str:
-    return f"Вахтовый цикл — {value}."
+    return f"Работаешь {value}."
 
 
 def _watch_duration_sentence(value: str) -> str:
-    return f"Вахта длится {value}."
+    return f"Одна вахта длится {value}."
 
 
 def _shift_duration_sentence(value: str) -> str:
     match = re.search(r"\b\d{1,2}\s+час(?:а|ов)?\b", value.lower())
     if match:
-        return f"Смена длится {match.group(0)}."
-    return f"Режим смены: {value}."
+        return f"Смена — {match.group(0)}."
+    return f"По смене у тебя {value}."
 
 
 def _watch_alternation_sentence(value: str) -> str:
+    return f"{_capitalize(_watch_alternation_clause(value))}."
+
+
+def _watch_alternation_clause(value: str) -> str:
     lowered = value.lower()
     if "день" in lowered and "ноч" in lowered:
-        return "Одна вахта дневная, другая ночная."
-    return f"Чередование вахт: {value}."
+        return "одна вахта дневная, другая ночная"
+    return f"чередование такое: {value}"
 
 
 def _food_sentence(value: str) -> str:
     cleaned = value.replace(" до ", ":00-").replace(", ", "; ")
-    return f"Расписание питания: {cleaned}."
+    return f"По питанию так: {cleaned}."
+
+
+def _capitalize(text: str) -> str:
+    if not text:
+        return text
+    return text[0].upper() + text[1:]
