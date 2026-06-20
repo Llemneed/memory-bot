@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from typing import Any
 
@@ -9,10 +10,21 @@ import aiosqlite
 from config import settings
 
 WRITE_LOCK = asyncio.Lock()
+_QUESTION_PREFIX = re.compile(
+    r"^\s*((?:по|на|в)\s+)?"
+    r"(как|какой|какая|какие|какому|какой|каких|каким|где|когда|почему|зачем|"
+    r"кто|что|ли|кем|чем|сколько)\b",
+    re.IGNORECASE,
+)
 
 
 def normalize_message_text(text: str) -> str:
     return " ".join(text.split()).strip().lower()
+
+
+def is_question_like(text: str) -> bool:
+    normalized = normalize_message_text(text)
+    return normalized.endswith("?") or _QUESTION_PREFIX.search(normalized) is not None
 
 
 async def save_message(
@@ -73,8 +85,10 @@ async def get_last_n(
     user_id: int,
     n: int | None = None,
     include_assistant: bool = True,
+    include_questions: bool = True,
 ) -> list[dict[str, Any]]:
     limit = n or settings.HISTORY_LAST_N
+    fetch_limit = max(limit * 4, limit)
     role_filter = "" if include_assistant else "AND role = 'user'"
     async with db.execute(
         f"""
@@ -84,8 +98,26 @@ async def get_last_n(
         ORDER BY created_at DESC
         LIMIT ?
         """,
-        (user_id, limit),
+        (user_id, fetch_limit),
     ) as cur:
         rows = await cur.fetchall()
 
-    return [{"role": row["role"], "content": row["text"]} for row in reversed(rows)]
+    filtered: list[dict[str, Any]] = []
+    seen_normalized: set[tuple[str, str]] = set()
+    for row in reversed(rows):
+        role = row["role"]
+        text = row["text"]
+        normalized = normalize_message_text(text)
+        if not normalized:
+            continue
+        if not include_questions and role == "user" and is_question_like(text):
+            continue
+        dedupe_key = (role, normalized)
+        if dedupe_key in seen_normalized:
+            continue
+        seen_normalized.add(dedupe_key)
+        filtered.append({"role": role, "content": text})
+        if len(filtered) >= limit:
+            break
+
+    return filtered

@@ -108,6 +108,8 @@ def extract_facts(text: str) -> list[FactCandidate]:
         normalized_cleaned = normalize_fact_text(cleaned_clause)
         if not normalized_cleaned or _looks_like_question(normalized_cleaned):
             continue
+        if _looks_like_correction_rejection(normalized_cleaned):
+            continue
         cleaned_clause = cleaned_clause.strip(" ,.!?;")
         if not _looks_memory_worthy(normalized_cleaned):
             continue
@@ -278,6 +280,10 @@ def _looks_memory_worthy(text: str) -> bool:
         or _looks_like_temporal_state(text)
         or _looks_like_topic_value(text)
     )
+
+
+def _looks_like_correction_rejection(text: str) -> bool:
+    return text.startswith("не ") and " а " in text
 
 
 def _extract_name(text: str) -> FactCandidate | None:
@@ -496,6 +502,22 @@ def _score_fact_row(row: aiosqlite.Row, *, query_tokens: list[str]) -> int:
     if score == 0 and not query_tokens:
         return 1
     return score
+
+
+def _display_fact_key(key: str) -> str:
+    canonical_key = _canonical_fact_key(key)
+    labels = {
+        "работаю": "вахтовый цикл",
+        "роль": "роль / профессия",
+        "живу": "место проживания",
+        "вахта": "длительность вахты",
+        "график": "длительность смены",
+        "режим": "режим / правило",
+        "одна вахта": "чередование вахт",
+        "завтрак с": "расписание питания",
+        "у меня": "режим",
+    }
+    return labels.get(canonical_key, canonical_key)
 
 
 def _canonical_fact_key(key: str) -> str:
