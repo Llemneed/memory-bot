@@ -1,8 +1,8 @@
 """
-Retrieval через SQLite FTS5.
+SQLite FTS retrieval helpers.
 
-Ищет релевантные сообщения из всей истории пользователя
-по ключевым словам текущего запроса.
+This layer is only a raw-history fallback. We keep it useful by skipping
+duplicate entries and old user questions that tend to pollute the prompt.
 """
 from __future__ import annotations
 
@@ -17,16 +17,24 @@ from dialogs.history import normalize_message_text
 
 log = logging.getLogger(__name__)
 
-# Символы, которые нужно экранировать в FTS5-запросе
-_FTS_SPECIAL = re.compile(r'["\'\(\)\[\]\{\}\:\*\^]')
+_FTS_SPECIAL = re.compile(r'["\'()\[\]{}:*^]')
+_QUESTION_PREFIX = re.compile(
+    r"^\s*((?:по|на|в)\s+)?"
+    r"(как|какой|какая|какие|какому|какой|каких|каким|где|когда|почему|зачем|"
+    r"кто|что|ли|кем|чем|сколько)\b",
+    re.IGNORECASE,
+)
 
 
 def _sanitize_query(text: str) -> str:
-    """Убирает спецсимволы FTS5, берём первые 10 слов."""
     cleaned = _FTS_SPECIAL.sub(" ", text)
     words = cleaned.split()[:10]
-    # Оборачиваем каждое слово в кавычки для точного поиска токенов
-    return " OR ".join(f'"{w}"' for w in words if len(w) > 2)
+    return " OR ".join(f'"{word}"' for word in words if len(word) > 2)
+
+
+def _looks_like_question(text: str) -> bool:
+    normalized = normalize_message_text(text)
+    return normalized.endswith("?") or _QUESTION_PREFIX.search(normalized) is not None
 
 
 async def retrieve(
@@ -37,10 +45,6 @@ async def retrieve(
     top_k: int | None = None,
     exclude_text: str | None = None,
 ) -> list[dict[str, Any]]:
-    """
-    Возвращает top_k релевантных сообщений из истории пользователя.
-    Результат: [{role, text, created_at, score}]
-    """
     k = top_k or settings.RETRIEVAL_TOP_K
     fts_query = _sanitize_query(query)
     excluded_normalized = normalize_message_text(exclude_text or "")
@@ -49,6 +53,7 @@ async def retrieve(
         return []
 
     try:
+        fetch_limit = max(k * 4, k)
         async with db.execute(
             """
             SELECT m.role, m.text, m.created_at,
@@ -61,10 +66,33 @@ async def retrieve(
             ORDER BY score
             LIMIT ?
             """,
-            (fts_query, user_id, excluded_normalized, excluded_normalized, k),
+            (fts_query, user_id, excluded_normalized, excluded_normalized, fetch_limit),
         ) as cur:
             rows = await cur.fetchall()
-        return [{"role": r[0], "text": r[1], "created_at": r[2], "score": r[3]} for r in rows]
-    except aiosqlite.OperationalError as e:
-        log.warning("FTS retrieval failed: %s", e)
+
+        results: list[dict[str, Any]] = []
+        seen_normalized: set[str] = set()
+        for role, text, created_at, score in rows:
+            normalized_text = normalize_message_text(text)
+            if not normalized_text or normalized_text in seen_normalized:
+                continue
+            seen_normalized.add(normalized_text)
+
+            if role == "user" and _looks_like_question(text):
+                continue
+
+            results.append(
+                {
+                    "role": role,
+                    "text": text,
+                    "created_at": created_at,
+                    "score": score,
+                }
+            )
+            if len(results) >= k:
+                break
+
+        return results
+    except aiosqlite.OperationalError as exc:
+        log.warning("FTS retrieval failed: %s", exc)
         return []
