@@ -154,7 +154,9 @@ async def handle_message(msg: Message) -> None:
     try:
         fact_hits = await retrieve_facts(db, user_id=user_id, dialog_id=dialog_id, query=user_text)
         retrieved = await retrieve(db, user_id=user_id, query=user_text, exclude_text=user_text)
-        history = await get_last_n(db, user_id=user_id)
+        # Keep the prompt anchored in the user's own words so the model
+        # does not treat its earlier mistaken replies as reliable facts.
+        history = await get_last_n(db, user_id=user_id, include_assistant=False)
     finally:
         await db.close()
 

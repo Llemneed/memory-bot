@@ -72,12 +72,15 @@ async def get_last_n(
     *,
     user_id: int,
     n: int | None = None,
+    include_assistant: bool = True,
 ) -> list[dict[str, Any]]:
     limit = n or settings.HISTORY_LAST_N
+    role_filter = "" if include_assistant else "AND role = 'user'"
     async with db.execute(
-        """
+        f"""
         SELECT role, text FROM messages
         WHERE user_id = ?
+          {role_filter}
         ORDER BY created_at DESC
         LIMIT ?
         """,
