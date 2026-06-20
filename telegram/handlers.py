@@ -15,6 +15,7 @@ from llm.g4f_client import complete
 from llm.prompts import build_system_prompt
 from memory.constraints import trim_history, trim_retrieval_block
 from memory.context_builder import build_memory_block
+from memory.fact_answers import maybe_build_fact_answer
 from memory.facts import build_fact_block, retrieve_facts, upsert_extracted_facts
 from memory.retrieval import retrieve
 
@@ -185,11 +186,30 @@ async def handle_message(msg: Message) -> None:
     if extracted_facts:
         log.info("Extracted %d fact(s) from user=%s", len(extracted_facts), user_id)
 
+    db = await get_db()
+    try:
+        fresh_fact_hits = await retrieve_facts(db, user_id=user_id, dialog_id=dialog_id, query=user_text)
+    finally:
+        await db.close()
+
+    direct_answer = maybe_build_fact_answer(user_text, fresh_fact_hits)
+    if direct_answer:
+        if not await safe_answer_chunks(msg, direct_answer):
+            log.warning("Failed to deliver direct fact response to user=%s", user_id)
+            return
+
+        db = await get_db()
+        try:
+            await save_message(db, user_id=user_id, dialog_id=dialog_id, role="assistant", text=direct_answer)
+        finally:
+            await db.close()
+        return
+
     raw_memory_block = ""
-    if len(fact_hits) < 3:
+    if len(fresh_fact_hits) < 3:
         raw_memory_block = build_memory_block(retrieved)
 
-    memory_parts = [build_fact_block(fact_hits), raw_memory_block]
+    memory_parts = [build_fact_block(fresh_fact_hits), raw_memory_block]
     memory_block = trim_retrieval_block("\n\n".join(part for part in memory_parts if part))
     system_prompt = build_system_prompt(memory_block)
     messages = trim_history(
