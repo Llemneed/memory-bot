@@ -251,6 +251,11 @@ async def handle_message(msg: Message) -> None:
     finally:
         await db.close()
 
+    log.info("FACT_RETRIEVED -> %s", fact_hits)
+    log.info("RETRIEVED -> %s", retrieved)
+    log.info("FACT_REFRESHED -> %s", fresh_fact_hits)
+    log.info("FACT_ACTIVE -> %s", direct_fact_hits)
+
     direct_answer_fallback = maybe_build_fact_answer(user_text, direct_fact_hits)
     fact_answer_hits = fresh_fact_hits or direct_fact_hits[: settings.FACTS_TOP_K]
 
@@ -265,6 +270,11 @@ async def handle_message(msg: Message) -> None:
 
     memory_parts = [fact_memory_block, raw_memory_block]
     memory_block = trim_retrieval_block("\n\n".join(part for part in memory_parts if part))
+    log.info(
+        "ANSWER_MODE -> %s",
+        "fact_llm_with_fallback" if direct_answer_fallback else "default_llm",
+    )
+    log.info("CONTEXT -> %s", memory_block)
     system_prompt = build_system_prompt(memory_block, fact_answer_mode=bool(direct_answer_fallback))
     messages = trim_history(
         [{"role": "system", "content": system_prompt}] +
