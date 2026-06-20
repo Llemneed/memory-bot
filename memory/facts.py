@@ -930,19 +930,6 @@ def _score_fact_row(row: aiosqlite.Row, *, query_tokens: list[str]) -> int:
         return 1
     return score
 
-
-def _display_fact_key_legacy_1(key: str) -> str:
-    return _display_fact_key(key)
-
-
-def _display_fact_key_legacy_2(key: str) -> str:
-    return _display_fact_key(key)
-
-
-def _display_fact_key_legacy_3(key: str) -> str:
-    return _display_fact_key(key)
-
-
 def _canonical_fact_key(key: str) -> str:
     if key.endswith(":role"):
         return "роль"
