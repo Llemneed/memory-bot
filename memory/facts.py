@@ -132,6 +132,8 @@ def extract_facts(text: str) -> list[FactCandidate]:
 
 
 def _extract_document_facts(text: str) -> list[FactCandidate]:
+    if _looks_like_question(normalize_fact_text(text)):
+        return []
     route = _extract_route(text)
     return [route] if route is not None else []
 
