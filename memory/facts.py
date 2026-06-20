@@ -82,6 +82,39 @@ _STOPWORDS = {
     "от",
 }
 
+_TRANSIENT_SELF_STATE_TOKENS = {
+    "устал",
+    "устала",
+    "устали",
+    "уставший",
+    "уставшая",
+    "сонный",
+    "сонная",
+    "сплю",
+    "лежу",
+    "сижу",
+    "стою",
+    "болею",
+    "болен",
+    "больна",
+    "болит",
+    "проснулся",
+    "проснулась",
+    "встал",
+    "встала",
+    "отдыхаю",
+}
+
+_TRANSIENT_SELF_STATE_PHRASES = (
+    "только проснулся",
+    "только проснулась",
+    "только встал",
+    "только встала",
+    "хочу спать",
+    "не выспался",
+    "не выспалась",
+)
+
 
 @dataclass(frozen=True)
 class FactCandidate:
@@ -728,6 +761,24 @@ def _extract_temporal_fragment(text: str) -> FactCandidate | None:
     return FactCandidate(category="state", key="режим", value=_cleanup_value(text), source_text=text, confidence=0.7)
 
 
+def _looks_like_transient_self_state(value: str) -> bool:
+    normalized = normalize_fact_text(value)
+    if not normalized:
+        return False
+
+    if any(phrase in normalized for phrase in _TRANSIENT_SELF_STATE_PHRASES):
+        return True
+
+    tokens = set(re.findall(r"[\w-]+", normalized))
+    if tokens & _TRANSIENT_SELF_STATE_TOKENS:
+        return True
+
+    if normalized.startswith(("только ", "сейчас ", "пока ", "уже ")):
+        return True
+
+    return False
+
+
 def _extract_i_am(text: str) -> FactCandidate | None:
     match = _I_AM.match(text)
     if not match:
@@ -735,6 +786,8 @@ def _extract_i_am(text: str) -> FactCandidate | None:
 
     value = _cleanup_value(match.group("value"))
     if not value or value.count(" ") > 4:
+        return None
+    if _looks_like_transient_self_state(value):
         return None
 
     return FactCandidate(category="attribute", key="я", value=value, source_text=text, confidence=0.7)
@@ -797,6 +850,9 @@ def _looks_like_location_phrase(value: str) -> bool:
 
 
 def _looks_like_topic_value(text: str) -> bool:
+    if normalize_fact_text(text).startswith("я "):
+        return False
+
     match = _TOPIC_VALUE.match(text)
     if not match:
         return False
