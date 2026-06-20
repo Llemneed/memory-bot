@@ -146,8 +146,25 @@ async def upsert_extracted_facts(
     text: str,
     source_message_id: int | None,
 ) -> list[FactCandidate]:
-    candidates = extract_facts(text)
+    raw_candidates = extract_facts(text)
+    deduped: dict[tuple[str, str], FactCandidate] = {}
+    for candidate in raw_candidates:
+        canonical = _canonicalize_fact_candidate(candidate)
+        marker = (canonical.category, canonical.key)
+        current = deduped.get(marker)
+        if current is None or _prefer_candidate_fact(canonical, current):
+            deduped[marker] = canonical
+
+    candidates = list(deduped.values())
     for candidate in candidates:
+        existing = await _get_active_fact_row(
+            db,
+            user_id=user_id,
+            dialog_id=dialog_id,
+            fact_key=candidate.key,
+        )
+        if existing is not None and _prefer_existing_fact(existing, candidate):
+            continue
         await db.execute(
             """
             INSERT INTO facts (
@@ -180,6 +197,28 @@ async def upsert_extracted_facts(
     if candidates:
         await db.commit()
     return candidates
+
+
+async def _get_active_fact_row(
+    db: aiosqlite.Connection,
+    *,
+    user_id: int,
+    dialog_id: str,
+    fact_key: str,
+) -> aiosqlite.Row | None:
+    async with db.execute(
+        """
+        SELECT category, fact_key, fact_value, confidence, source_text
+        FROM facts
+        WHERE user_id = ?
+          AND dialog_id = ?
+          AND fact_key = ?
+          AND status = 'active'
+        LIMIT 1
+        """,
+        (user_id, dialog_id, fact_key),
+    ) as cur:
+        return await cur.fetchone()
 
 
 async def retrieve_facts(
@@ -339,6 +378,81 @@ def _prepare_fact_answer_facts(facts: list[dict[str, Any]]) -> list[dict[str, An
             prepared_by_identity[identity] = candidate
 
     return [prepared_by_identity[identity] for identity in order]
+
+
+def _canonicalize_fact_candidate(candidate: FactCandidate) -> FactCandidate:
+    canonical_key = _canonicalize_schedule_key(candidate.key, candidate.value)
+    canonical_value = _canonicalize_schedule_value(canonical_key, candidate.value)
+    if canonical_key == candidate.key and canonical_value == candidate.value:
+        return candidate
+    return FactCandidate(
+        category=candidate.category,
+        key=canonical_key,
+        value=canonical_value,
+        source_text=candidate.source_text,
+        confidence=candidate.confidence,
+    )
+
+
+def _canonicalize_schedule_key(key: str, value: str) -> str:
+    normalized_key = normalize_fact_text(key)
+    normalized_value = normalize_fact_text(value)
+
+    if normalized_key in {"смена", "смены"}:
+        return "график"
+    if normalized_key == "режим" and "смен" in normalized_value and re.search(r"\b\d{1,2}\s+час", normalized_value):
+        return "график"
+    if normalized_key in {"вахты", "одна вахта"} and _looks_like_watch_alternation(normalized_value):
+        return "одна вахта"
+
+    return key
+
+
+def _canonicalize_schedule_value(key: str, value: str) -> str:
+    normalized_value = normalize_fact_text(value)
+
+    if key == "график":
+        hours = _extract_shift_hours(normalized_value)
+        if hours:
+            return hours
+    if key == "одна вахта" and _looks_like_watch_alternation(normalized_value):
+        return "день, другая вахта ночь"
+
+    return value
+
+
+def _extract_shift_hours(value: str) -> str | None:
+    match = re.search(r"\b(\d{1,2})\s+час(?:а|ов)?\b", value)
+    if not match:
+        return None
+    hours = match.group(1)
+    return f"{hours} часов"
+
+
+def _looks_like_watch_alternation(value: str) -> bool:
+    return "день" in value and "ноч" in value
+
+
+def _prefer_candidate_fact(candidate: FactCandidate, current: FactCandidate) -> bool:
+    identity = _fact_answer_identity({"key": candidate.key, "value": candidate.value})
+    return _prefer_fact_answer_candidate(
+        {"key": candidate.key, "value": candidate.value, "confidence": candidate.confidence},
+        {"key": current.key, "value": current.value, "confidence": current.confidence},
+        identity,
+    )
+
+
+def _prefer_existing_fact(existing: aiosqlite.Row, candidate: FactCandidate) -> bool:
+    identity = _fact_answer_identity({"key": candidate.key, "value": candidate.value})
+    return not _prefer_fact_answer_candidate(
+        {"key": candidate.key, "value": candidate.value, "confidence": candidate.confidence},
+        {
+            "key": existing["fact_key"],
+            "value": existing["fact_value"],
+            "confidence": existing["confidence"],
+        },
+        identity,
+    )
 
 
 def _fact_answer_identity(fact: dict[str, Any]) -> str:
