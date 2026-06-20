@@ -1,22 +1,22 @@
 """
-Constraints — защита от переполнения контекста.
+Constraints - zashchita ot perepolneniya konteksta.
 
-Обрезает историю и retrieval до безопасных размеров.
+Obrezaet istoriyu i retrieval do bezopasnykh razmerov.
 """
 from __future__ import annotations
 
 from config import settings
 
-# Грубая оценка: 1 токен ≈ 4 символа
+# Grubaya otsenka: 1 token ~= 4 simvola
 _CHARS_PER_TOKEN = 4
 _MAX_HISTORY_CHARS = 4000
 
 
 def trim_history(messages: list[dict]) -> list[dict]:
     """
-    Обрезает историю диалога справа налево,
-    чтобы суммарный размер не превышал лимит.
-    Первое сообщение (system) всегда сохраняется.
+    Obrezaet istoriyu dialoga sprava nalevo,
+    chtoby summarnyy razmer ne prevyshal limit.
+    Pervoe soobshchenie (system) vsegda sokhranyaetsya.
     """
     if not messages:
         return messages
@@ -42,7 +42,16 @@ def trim_history(messages: list[dict]) -> list[dict]:
 
 
 def trim_retrieval_block(block: str) -> str:
-    """Обрезает блок памяти до MAX_CONTEXT_CHARS символов."""
+    """Obrezaet blok pamyati do MAX_CONTEXT_CHARS simvolov."""
     if len(block) <= settings.MAX_CONTEXT_CHARS:
         return block
-    return block[: settings.MAX_CONTEXT_CHARS] + "\n[...обрезано...]"
+
+    marker = "\n[...обрезано...]"
+    kept_lines = block.splitlines()
+
+    while kept_lines and len("\n".join(kept_lines) + marker) > settings.MAX_CONTEXT_CHARS:
+        kept_lines.pop()
+
+    if kept_lines:
+        return "\n".join(kept_lines) + marker
+    return marker.lstrip("\n")
