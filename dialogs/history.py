@@ -102,9 +102,9 @@ async def get_last_n(
     ) as cur:
         rows = await cur.fetchall()
 
-    filtered: list[dict[str, Any]] = []
+    filtered_desc: list[dict[str, Any]] = []
     seen_normalized: set[tuple[str, str]] = set()
-    for row in reversed(rows):
+    for row in rows:
         role = row["role"]
         text = row["text"]
         normalized = normalize_message_text(text)
@@ -116,8 +116,8 @@ async def get_last_n(
         if dedupe_key in seen_normalized:
             continue
         seen_normalized.add(dedupe_key)
-        filtered.append({"role": role, "content": text})
-        if len(filtered) >= limit:
+        filtered_desc.append({"role": role, "content": text})
+        if len(filtered_desc) >= limit:
             break
 
-    return filtered
+    return list(reversed(filtered_desc))
