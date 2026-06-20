@@ -16,8 +16,17 @@ _QUESTION_PREFIX = re.compile(
     r"^\s*(как|какой|какая|какие|где|когда|почему|зачем|кто|что|ли)\b",
     re.IGNORECASE,
 )
+_DISCOURSE_PREFIX = re.compile(
+    r"^\s*(?:нет|да|ну|так|слушай|смотри|короче|блин|блять|ладно|вообще|значит)\s*[,:\-]?\s*",
+    re.IGNORECASE,
+)
 _SCHEDULE_VALUE = re.compile(
-    r"\b\d{1,2}\s*/\s*\d{1,2}\b|\bмесяц\s+на\s+месяц\b|\bнедел\w+\s+через\s+\w+\b",
+    r"\b\d{1,2}\s*/\s*\d{1,2}\b|\bмесяц\s+на\s+месяц\b|\bкаждый\s+день\b|\bчерез\s+месяц\b",
+    re.IGNORECASE,
+)
+_TIME_MARKER = re.compile(
+    r"\b\d{1,2}\b|\b\d{1,2}\s*(?:час|часа|часов|день|дня|дней|месяц|месяца|месяцев)\b|"
+    r"\b(?:час|часа|часов|день|дня|дней|недел\w*|месяц|месяца|месяцев|год|года|лет|числа|смена|смены|смен)\b",
     re.IGNORECASE,
 )
 _NAME = re.compile(r"\bменя\s+зовут\s+(?P<value>[A-ZА-ЯЁ][\w-]+)", re.IGNORECASE)
@@ -27,18 +36,26 @@ _PREFERENCE = re.compile(
 )
 _LIVE_IN = re.compile(r"^я\s+жив[ау]\s+(?:в|на)\s+(?P<value>[^.!?\n]+)$", re.IGNORECASE)
 _POSSESSION = re.compile(r"^у\s+меня(?:\s+есть)?\s+(?P<value>[^.!?\n]+)$", re.IGNORECASE)
+_TOPIC_POSSESSION = re.compile(
+    r"^(?P<key>[A-Za-zА-Яа-яЁё-]+(?:\s+[A-Za-zА-Яа-яЁё-]+){0,2})\s+у\s+меня\s+(?P<value>[^.!?\n]+)$",
+    re.IGNORECASE,
+)
 _MY_IS = re.compile(
     r"^(?:мой|моя|моё|мои)\s+(?P<key>[^\s.!?,]+)(?:\s+(?:это|—|-|зовут))?\s+(?P<value>[^.!?\n]+)$",
     re.IGNORECASE,
 )
 _I_AM = re.compile(r"^я\s+(?P<value>[^.!?\n]+)$", re.IGNORECASE)
-_VERB_ENDING = r"(?:ю|у|усь|юсь|аю|яю|уся|юсья|ем|им|аюсь|яюсь)"
+_VERB_ENDING = r"(?:ю|у|усь|юсь|аю|яю|ем|им|аюсь|яюсь|аем|яем|ут|ют|ет)"
 _VERB_PREDICATE = re.compile(
     rf"^я\s+(?P<verb>[а-яёa-z-]+{_VERB_ENDING})\s+(?P<value>[^.!?\n]+)$",
     re.IGNORECASE,
 )
 _BARE_VERB_PREDICATE = re.compile(
     rf"^(?P<verb>[а-яёa-z-]+{_VERB_ENDING})\s+(?P<value>[^.!?\n]+)$",
+    re.IGNORECASE,
+)
+_TOPIC_VALUE = re.compile(
+    r"^(?P<key>[A-Za-zА-Яа-яЁё-]+(?:\s+[A-Za-zА-Яа-яЁё-]+){0,1})\s+(?P<value>[^.!?\n]+)$",
     re.IGNORECASE,
 )
 _STOPWORDS = {
@@ -64,6 +81,7 @@ class FactCandidate:
     category: str
     key: str
     value: str
+    source_text: str
     confidence: float = 0.9
 
 
@@ -73,27 +91,29 @@ def normalize_fact_text(text: str) -> str:
 
 def extract_facts(text: str) -> list[FactCandidate]:
     source = " ".join(text.split()).strip()
-    normalized = normalize_fact_text(text)
-    if not normalized or _looks_like_question(normalized) or not _looks_memory_worthy(normalized):
+    if not source:
         return []
 
-    candidates = [
-        _extract_name(source),
-        _extract_preference(source),
-        _extract_live_in(source),
-        _extract_possession(source),
-        _extract_my_is(source),
-        _extract_predicate(source),
-    ]
-
-    if not any(candidate is not None for candidate in candidates):
-        candidates.append(_extract_i_am(source))
-
     seen: dict[tuple[str, str], FactCandidate] = {}
-    for candidate in candidates:
-        if candidate is None:
+    for clause in _iter_candidate_clauses(source):
+        normalized = normalize_fact_text(clause)
+        if not normalized or _looks_like_question(normalized):
             continue
-        seen.setdefault((candidate.category, candidate.key), candidate)
+
+        cleaned_clause = _strip_discourse_prefix(clause)
+        normalized_cleaned = normalize_fact_text(cleaned_clause)
+        if not normalized_cleaned or _looks_like_question(normalized_cleaned):
+            continue
+        if not _looks_memory_worthy(normalized_cleaned):
+            continue
+
+        candidates = _extract_clause_facts(cleaned_clause)
+
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            seen[(candidate.category, candidate.key)] = candidate
+
     return list(seen.values())
 
 
@@ -133,7 +153,7 @@ async def upsert_extracted_facts(
                 normalize_fact_text(candidate.value),
                 source_message_id,
                 candidate.confidence,
-                text,
+                candidate.source_text,
             ),
         )
     if candidates:
@@ -201,6 +221,39 @@ def build_fact_block(facts: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _extract_clause_facts(text: str) -> list[FactCandidate | None]:
+    for extractor in (
+        _extract_name,
+        _extract_preference,
+        _extract_live_in,
+        _extract_topic_possession,
+        _extract_possession,
+        _extract_my_is,
+        _extract_predicate,
+        _extract_topic_value,
+        _extract_temporal_fragment,
+        _extract_i_am,
+    ):
+        candidate = extractor(text)
+        if candidate is not None:
+            return [candidate]
+    return []
+
+
+def _iter_candidate_clauses(text: str) -> list[str]:
+    parts = [part.strip(" ,") for part in re.split(r"[.!?;\n]+", text) if part.strip(" ,")]
+    return parts or [text.strip()]
+
+
+def _strip_discourse_prefix(text: str) -> str:
+    cleaned = text.strip()
+    while True:
+        updated = _DISCOURSE_PREFIX.sub("", cleaned, count=1).strip()
+        if updated == cleaned:
+            return cleaned
+        cleaned = updated
+
+
 def _looks_like_question(text: str) -> bool:
     return text.endswith("?") or _QUESTION_PREFIX.search(text) is not None
 
@@ -210,6 +263,9 @@ def _looks_memory_worthy(text: str) -> bool:
         _FIRST_PERSON_PREFIX.search(text) is not None
         or _PREFERENCE.match(text) is not None
         or _BARE_VERB_PREDICATE.match(text) is not None
+        or _TOPIC_POSSESSION.match(text) is not None
+        or _looks_like_temporal_state(text)
+        or _looks_like_topic_value(text)
     )
 
 
@@ -217,7 +273,12 @@ def _extract_name(text: str) -> FactCandidate | None:
     match = _NAME.search(text)
     if not match:
         return None
-    return FactCandidate(category="attribute", key="имя", value=_cleanup_value(match.group("value")))
+    return FactCandidate(
+        category="attribute",
+        key="имя",
+        value=_cleanup_value(match.group("value")),
+        source_text=text,
+    )
 
 
 def _extract_preference(text: str) -> FactCandidate | None:
@@ -231,7 +292,7 @@ def _extract_preference(text: str) -> FactCandidate | None:
 
     sign = "нет" if match.group("neg") else "да"
     key = _derive_key_from_object(value)
-    return FactCandidate(category="preference", key=key, value=sign)
+    return FactCandidate(category="preference", key=key, value=sign, source_text=text)
 
 
 def _extract_live_in(text: str) -> FactCandidate | None:
@@ -240,7 +301,21 @@ def _extract_live_in(text: str) -> FactCandidate | None:
         return None
     value = _cleanup_value(match.group("value"))
     value = re.sub(r"^(?:в|на)\s+", "", value, flags=re.IGNORECASE)
-    return FactCandidate(category="attribute", key="живу", value=value)
+    return FactCandidate(category="attribute", key="живу", value=value, source_text=text)
+
+
+def _extract_topic_possession(text: str) -> FactCandidate | None:
+    match = _TOPIC_POSSESSION.match(text)
+    if not match:
+        return None
+
+    key = _normalize_key(match.group("key"))
+    value = _cleanup_value(match.group("value"))
+    if not key or not value:
+        return None
+
+    category = "state" if _looks_like_temporal_state(value) else "attribute"
+    return FactCandidate(category=category, key=key, value=value, source_text=text, confidence=0.85)
 
 
 def _extract_possession(text: str) -> FactCandidate | None:
@@ -252,20 +327,22 @@ def _extract_possession(text: str) -> FactCandidate | None:
     if not raw_value:
         return None
 
-    if _SCHEDULE_VALUE.search(raw_value):
-        return FactCandidate(category="state", key="у меня", value=raw_value)
+    if _looks_like_temporal_state(raw_value):
+        return FactCandidate(category="state", key="у меня", value=raw_value, source_text=text, confidence=0.8)
 
     tokens = raw_value.split()
     if len(tokens) >= 2 and _looks_like_named_entity(tokens[-1]):
         key = _normalize_key(" ".join(tokens[:-1]))
         value = tokens[-1]
         if key:
-            return FactCandidate(category="attribute", key=key, value=value)
+            return FactCandidate(category="attribute", key=key, value=value, source_text=text)
 
     return FactCandidate(
         category="attribute",
         key=_normalize_key(tokens[0]),
         value=" ".join(tokens[1:]) or "есть",
+        source_text=text,
+        confidence=0.8,
     )
 
 
@@ -279,7 +356,7 @@ def _extract_my_is(text: str) -> FactCandidate | None:
     if not key or not value:
         return None
 
-    return FactCandidate(category="attribute", key=key, value=value)
+    return FactCandidate(category="attribute", key=key, value=value, source_text=text)
 
 
 def _extract_predicate(text: str) -> FactCandidate | None:
@@ -292,8 +369,34 @@ def _extract_predicate(text: str) -> FactCandidate | None:
     if not verb or not value:
         return None
 
-    category = "state" if _SCHEDULE_VALUE.search(value) else "attribute"
-    return FactCandidate(category=category, key=verb, value=value)
+    category = "state" if _looks_like_temporal_state(value) else "attribute"
+    key = verb
+    if category == "attribute" and _looks_like_role(value):
+        key = f"{verb}:role"
+    elif category == "attribute" and _looks_like_location_phrase(value):
+        key = f"{verb}:place"
+
+    return FactCandidate(category=category, key=key, value=value, source_text=text)
+
+
+def _extract_topic_value(text: str) -> FactCandidate | None:
+    match = _TOPIC_VALUE.match(text)
+    if not match:
+        return None
+
+    key = _normalize_key(match.group("key"))
+    value = _cleanup_value(match.group("value"))
+    if not key or not value or not _looks_like_topic_value(text):
+        return None
+
+    category = "state" if _looks_like_temporal_state(value) else "attribute"
+    return FactCandidate(category=category, key=key, value=value, source_text=text, confidence=0.75)
+
+
+def _extract_temporal_fragment(text: str) -> FactCandidate | None:
+    if not _looks_like_temporal_state(text):
+        return None
+    return FactCandidate(category="state", key="режим", value=_cleanup_value(text), source_text=text, confidence=0.7)
 
 
 def _extract_i_am(text: str) -> FactCandidate | None:
@@ -305,7 +408,7 @@ def _extract_i_am(text: str) -> FactCandidate | None:
     if not value or value.count(" ") > 4:
         return None
 
-    return FactCandidate(category="attribute", key="я", value=value)
+    return FactCandidate(category="attribute", key="я", value=value, source_text=text, confidence=0.7)
 
 
 def _derive_key_from_object(text: str) -> str:
@@ -328,6 +431,42 @@ def _looks_like_named_entity(token: str) -> bool:
         return False
     first = token[0]
     return first.isupper() or first in "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЭЮЯ"
+
+
+def _looks_like_temporal_state(text: str) -> bool:
+    normalized = normalize_fact_text(text)
+    return _SCHEDULE_VALUE.search(normalized) is not None or _TIME_MARKER.search(normalized) is not None
+
+
+def _looks_like_role(value: str) -> bool:
+    normalized = normalize_fact_text(value)
+    tokens = normalized.split()
+    if not tokens or len(tokens) > 5:
+        return False
+    return any(
+        token.endswith(suffix)
+        for token in tokens
+        for suffix in ("ом", "ем", "ой", "ою", "ым", "им", "ией", "ией", "ами", "ями")
+    )
+
+
+def _looks_like_location_phrase(value: str) -> bool:
+    return re.match(r"^(?:в|на|из|у|под)\s+", normalize_fact_text(value)) is not None
+
+
+def _looks_like_topic_value(text: str) -> bool:
+    match = _TOPIC_VALUE.match(text)
+    if not match:
+        return False
+    key = _normalize_key(match.group("key"))
+    value = _cleanup_value(match.group("value"))
+    if not key or not value:
+        return False
+    if key in {"день", "дни", "месяц", "месяцы", "час", "часы", "число", "числа"}:
+        return False
+    if _looks_like_temporal_state(value) or _looks_like_role(value) or _looks_like_location_phrase(value):
+        return True
+    return bool(re.search(r"\d", value)) or len(value.split()) <= 6
 
 
 def _query_tokens(query: str) -> list[str]:
