@@ -931,52 +931,16 @@ def _score_fact_row(row: aiosqlite.Row, *, query_tokens: list[str]) -> int:
     return score
 
 
-def _display_fact_key(key: str) -> str:
-    canonical_key = _canonical_fact_key(key)
-    labels = {
-        "работаю": "вахтовый цикл",
-        "роль": "роль / профессия",
-        "живу": "место проживания",
-        "вахта": "длительность вахты",
-        "график": "длительность смены",
-        "режим": "режим / правило",
-        "одна вахта": "чередование вахт",
-        "завтрак с": "расписание питания",
-        "у меня": "режим",
-    }
-    return labels.get(canonical_key, canonical_key)
+def _display_fact_key_legacy_1(key: str) -> str:
+    return _display_fact_key(key)
 
 
-def _display_fact_key(key: str) -> str:
-    canonical_key = _canonical_fact_key(key)
-    labels = {
-        "работаю": "вахтовый цикл",
-        "роль": "роль / профессия",
-        "живу": "место проживания",
-        "вахта": "длительность вахты",
-        "график": "длительность смены",
-        "режим": "режим / правило",
-        "одна вахта": "чередование вахт",
-        "завтрак с": "расписание питания",
-        "у меня": "режим",
-    }
-    return labels.get(canonical_key, canonical_key)
+def _display_fact_key_legacy_2(key: str) -> str:
+    return _display_fact_key(key)
 
 
-def _display_fact_key(key: str) -> str:
-    canonical_key = _canonical_fact_key(key)
-    labels = {
-        "работаю": "вахтовый цикл",
-        "роль": "роль / профессия",
-        "живу": "место проживания",
-        "вахта": "длительность вахты",
-        "график": "длительность смены",
-        "режим": "режим / правило",
-        "одна вахта": "чередование вахт",
-        "завтрак с": "расписание питания",
-        "у меня": "режим",
-    }
-    return labels.get(canonical_key, canonical_key)
+def _display_fact_key_legacy_3(key: str) -> str:
+    return _display_fact_key(key)
 
 
 def _canonical_fact_key(key: str) -> str:

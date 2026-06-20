@@ -52,7 +52,7 @@ def maybe_build_fact_answer(query: str, facts: list[dict]) -> str | None:
         return f"Работаешь {fact_map['роль']}."
 
     if asks_work_stay:
-        work_place = fact_map.get("место_работы")
+        work_place = fact_map.get("место работы")
         if work_place:
             return (
                 f"На работе ты {_work_place_tail(work_place)}. "
@@ -61,7 +61,7 @@ def maybe_build_fact_answer(query: str, facts: list[dict]) -> str | None:
         return "Где именно живешь на работе, ты отдельно не говорил."
 
     if asks_work_place:
-        work_place = fact_map.get("место_работы")
+        work_place = fact_map.get("место работы")
         if work_place:
             return f"Работаешь {_work_place_tail(work_place)}."
         if fact_map.get("живу"):
@@ -128,7 +128,7 @@ def _canonical_fact_key(key: str, value: str = "") -> str:
     if key.endswith(":role"):
         return "роль"
     if key.endswith(":place"):
-        return "место_работы"
+        return "место работы"
     normalized_value = _normalize_text(value)
     if key in {"смена", "смены"}:
         return "график"
