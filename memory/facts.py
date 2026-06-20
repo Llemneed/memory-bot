@@ -12,6 +12,10 @@ _FIRST_PERSON_PREFIX = re.compile(
     r"^\s*(я|у меня|мой|моя|моё|мои|меня)\b",
     re.IGNORECASE,
 )
+_SECOND_PERSON_PREFIX = re.compile(
+    r"^\s*(ты|тебя|тебе|тобой|тво[йеяёи])\b",
+    re.IGNORECASE,
+)
 _QUESTION_PREFIX = re.compile(
     r"^\s*((?:по|на|в)\s+)?(как|какой|какая|какие|какому|какой|каких|каким|где|когда|почему|зачем|кто|что|ли|кем|чем|сколько)\b",
     re.IGNORECASE,
@@ -617,6 +621,9 @@ def _looks_like_question(text: str) -> bool:
 
 
 def _looks_memory_worthy(text: str) -> bool:
+    if _looks_like_second_person_address(text):
+        return False
+
     return (
         _FIRST_PERSON_PREFIX.search(text) is not None
         or _PREFERENCE.match(text) is not None
@@ -852,6 +859,8 @@ def _looks_like_location_phrase(value: str) -> bool:
 def _looks_like_topic_value(text: str) -> bool:
     if normalize_fact_text(text).startswith("я "):
         return False
+    if _looks_like_second_person_address(text):
+        return False
 
     match = _TOPIC_VALUE.match(text)
     if not match:
@@ -869,6 +878,10 @@ def _looks_like_topic_value(text: str) -> bool:
     if _looks_like_temporal_state(value) or _looks_like_role(value) or _looks_like_location_phrase(value):
         return True
     return bool(re.search(r"\d", value)) or len(value.split()) <= 6
+
+
+def _looks_like_second_person_address(text: str) -> bool:
+    return _SECOND_PERSON_PREFIX.search(text) is not None
 
 
 def _query_tokens(query: str) -> list[str]:
