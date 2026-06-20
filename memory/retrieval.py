@@ -73,12 +73,15 @@ async def retrieve(
         results: list[dict[str, Any]] = []
         seen_normalized: set[str] = set()
         for role, text, created_at, score in rows:
+            if role != "user":
+                continue
+
             normalized_text = normalize_message_text(text)
             if not normalized_text or normalized_text in seen_normalized:
                 continue
             seen_normalized.add(normalized_text)
 
-            if role == "user" and _looks_like_question(text):
+            if _looks_like_question(text):
                 continue
 
             results.append(
