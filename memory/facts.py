@@ -224,10 +224,26 @@ def build_fact_block(facts: list[dict[str, Any]]) -> str:
     lines = ["=== Confirmed facts ==="]
     for fact in facts:
         lines.append(
-            f"- [{fact['category']}] {_display_fact_key(fact['key'])}: {fact['value']}"
+            f"- [{fact['category']}] {_fact_label_for_display(fact['key'])}: {fact['value']}"
         )
     lines.append("=== End facts ===")
     return "\n".join(lines)
+
+
+def _fact_label_for_display(key: str) -> str:
+    canonical_key = _canonical_fact_key(key)
+    labels = {
+        "работаю": "вахтовый цикл",
+        "роль": "роль / профессия",
+        "живу": "место проживания",
+        "вахта": "длительность вахты",
+        "график": "длительность смены",
+        "режим": "режим / правило",
+        "одна вахта": "чередование вахт",
+        "завтрак с": "расписание питания",
+        "у меня": "режим",
+    }
+    return labels.get(canonical_key, canonical_key)
 
 
 def _extract_clause_facts(text: str) -> list[FactCandidate | None]:
