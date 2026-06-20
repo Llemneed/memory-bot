@@ -2,6 +2,33 @@ from __future__ import annotations
 
 import re
 
+_ROUTE_NODE_ALIASES = {
+    "салават": {
+        "variants": ("салават", "салавата"),
+        "from": "Салавата",
+        "to": "Салават",
+        "label": "Салават",
+    },
+    "уфа": {
+        "variants": ("уфа", "уфу", "уфы"),
+        "from": "Уфы",
+        "to": "Уфу",
+        "label": "Уфа",
+    },
+    "новый_уренгой": {
+        "variants": ("уренгой", "уренгоя", "новый уренгой", "нового уренгоя"),
+        "from": "Нового Уренгоя",
+        "to": "Новый Уренгой",
+        "label": "Новый Уренгой",
+    },
+    "мессояха": {
+        "variants": ("мессояха", "мессояху", "мессояхе"),
+        "from": "Мессояхи",
+        "to": "Мессояху",
+        "label": "Мессояха",
+    },
+}
+
 
 def maybe_build_fact_answer(query: str, facts: list[dict]) -> str | None:
     if not facts:
@@ -11,6 +38,11 @@ def maybe_build_fact_answer(query: str, facts: list[dict]) -> str | None:
     query_text = _normalize_text(query)
     if not _looks_like_fact_request(query_text, query_tokens):
         return None
+
+    route_answer = _route_answer(query_text, query_tokens, facts)
+    if route_answer:
+        return route_answer
+
     fact_map = _fact_map(facts)
 
     asks_where = "где" in query_tokens
@@ -125,6 +157,8 @@ def _fact_map(facts: list[dict]) -> dict[str, str]:
 
 
 def _canonical_fact_key(key: str, value: str = "") -> str:
+    if key.startswith("маршрут:"):
+        return "маршрут"
     if key.endswith(":role"):
         return "роль"
     if key.endswith(":place"):
@@ -140,6 +174,158 @@ def _canonical_fact_key(key: str, value: str = "") -> str:
         if any(marker in normalized_value for marker in ("месяц", "дней", "дня", "день")):
             return "вахта"
     return key
+
+
+def _route_answer(query_text: str, query_tokens: set[str], facts: list[dict]) -> str | None:
+    if not _looks_like_route_query(query_tokens):
+        return None
+
+    segments = _collect_route_segments(facts)
+    if not segments:
+        return None
+
+    ordered = _order_route_segments(segments)
+    if not ordered:
+        return None
+
+    if "сначала" in query_text:
+        return f"Сначала {ordered[0]['phrase']}."
+
+    target = _route_query_target(query_text, ordered)
+    if target:
+        ordered = _trim_route_segments_to_target(ordered, target)
+    if not ordered:
+        return None
+
+    phrases = [segment["phrase"] for segment in ordered]
+    chain = ", потом ".join(phrases)
+
+    if target == "новый_уренгой":
+        return f"До Нового Уренгоя добираешься так: {chain}."
+    if target == "мессояха" or "работ" in query_text:
+        return f"До работы добираешься так: {chain}."
+    if "сначала" in query_text:
+        return f"Сначала {phrases[0]}."
+    return f"Маршрут такой: {chain}."
+
+
+def _looks_like_route_query(query_tokens: set[str]) -> bool:
+    markers = (
+        "маршрут",
+        "маршрутом",
+        "доби",
+        "доезж",
+        "еду",
+        "езжу",
+        "дорог",
+        "путь",
+        "попада",
+        "добира",
+        "лет",
+        "вертолет",
+    )
+    return any(any(token.startswith(marker) for marker in markers) for token in query_tokens)
+
+
+def _collect_route_segments(facts: list[dict]) -> list[dict[str, str]]:
+    segments: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for fact in facts:
+        key = str(fact.get("key", "")).strip()
+        value = str(fact.get("value", "")).strip()
+        parsed = _parse_route_segment_key(key)
+        if parsed is None:
+            continue
+        source, dest = parsed
+        marker = (source, dest)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        segments.append(
+            {
+                "source": source,
+                "dest": dest,
+                "phrase": value or _route_segment_phrase(source, dest),
+            }
+        )
+
+    return segments
+
+
+def _parse_route_segment_key(key: str) -> tuple[str, str] | None:
+    if not key.startswith("маршрут:"):
+        return None
+    payload = key.split(":", 1)[1]
+    if "->" not in payload:
+        return None
+    source, dest = payload.split("->", 1)
+    source = source.strip()
+    dest = dest.strip()
+    if not source or not dest:
+        return None
+    return source, dest
+
+
+def _order_route_segments(segments: list[dict[str, str]]) -> list[dict[str, str]]:
+    if not segments:
+        return []
+
+    by_source = {segment["source"]: segment for segment in segments}
+    destinations = {segment["dest"] for segment in segments}
+    starts = [segment for segment in segments if segment["source"] not in destinations]
+    start = starts[0] if starts else segments[0]
+
+    ordered: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    current = start
+    while current is not None:
+        marker = (current["source"], current["dest"])
+        if marker in seen:
+            break
+        seen.add(marker)
+        ordered.append(current)
+        current = by_source.get(current["dest"])
+
+    for segment in segments:
+        marker = (segment["source"], segment["dest"])
+        if marker not in seen:
+            ordered.append(segment)
+
+    return ordered
+
+
+def _route_query_target(query_text: str, segments: list[dict[str, str]]) -> str | None:
+    for node, meta in _ROUTE_NODE_ALIASES.items():
+        if any(variant in query_text for variant in meta["variants"]):
+            return node
+
+    if "работ" in query_text:
+        return segments[-1]["dest"]
+    return None
+
+
+def _trim_route_segments_to_target(segments: list[dict[str, str]], target: str) -> list[dict[str, str]]:
+    trimmed: list[dict[str, str]] = []
+    for segment in segments:
+        trimmed.append(segment)
+        if segment["dest"] == target:
+            break
+    return trimmed
+
+
+def _route_segment_phrase(source: str, dest: str) -> str:
+    return f"из {_route_node_label(source, case='from')} в {_route_node_label(dest, case='to')}"
+
+
+def _route_node_label(node: str, *, case: str) -> str:
+    meta = _ROUTE_NODE_ALIASES.get(node)
+    if meta is not None:
+        return str(meta["from"] if case == "from" else meta["to"])
+    label = node.replace("_", " ").strip()
+    if not label:
+        return node
+    return f"{label[:1].upper()}{label[1:]}"
 
 
 def _normalize_text(text: str) -> str:

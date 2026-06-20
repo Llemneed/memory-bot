@@ -66,6 +66,53 @@ _ROUTE_MOTION = re.compile(
     r"\b(еду|езжу|добираюсь|доезжаю|лечу|летаю|выезжаю|отправляюсь)\b",
     re.IGNORECASE,
 )
+_ROUTE_SPLIT = re.compile(r"\b(?:потом|затем|дальше)\b|[.;]", re.IGNORECASE)
+_ROUTE_SOURCE = re.compile(
+    r"\b(?:из|с|от)\s+(?P<value>[A-Za-zА-Яа-яЁё-]+(?:\s+[A-Za-zА-Яа-яЁё-]+)?)",
+    re.IGNORECASE,
+)
+_ROUTE_DEST = re.compile(
+    r"\b(?:в|на|до)\s+(?P<value>[A-Za-zА-Яа-яЁё-]+(?:\s+[A-Za-zА-Яа-яЁё-]+)?)",
+    re.IGNORECASE,
+)
+_ROUTE_TRANSPORT = re.compile(
+    r"\b(?:на\s+вертолете|вертолетом|на\s+самолете|самолетом|поездом|на\s+поезде|"
+    r"на\s+машине|на\s+автобусе|на\s+такси)\b",
+    re.IGNORECASE,
+)
+_ROUTE_NON_LOCATION_MARKERS = (
+    "вертолет",
+    "самолет",
+    "поезд",
+    "машин",
+    "автобус",
+    "такси",
+    "вокзал",
+    "аэропорт",
+)
+_ROUTE_NODE_ALIASES = {
+    "салават": {
+        "variants": ("салават", "салавата"),
+        "from": "Салавата",
+        "to": "Салават",
+    },
+    "уфа": {
+        "variants": ("уфа", "уфу", "уфы"),
+        "from": "Уфы",
+        "to": "Уфу",
+    },
+    "новый_уренгой": {
+        "variants": ("уренгой", "уренгоя", "новый уренгой", "нового уренгоя"),
+        "from": "Нового Уренгоя",
+        "to": "Новый Уренгой",
+    },
+    "мессояха": {
+        "variants": ("мессояха", "мессояху", "мессояхе"),
+        "from": "Мессояхи",
+        "to": "Мессояху",
+    },
+}
+
 _STOPWORDS = {
     "есть",
     "это",
@@ -171,8 +218,7 @@ def extract_facts(text: str) -> list[FactCandidate]:
 def _extract_document_facts(text: str) -> list[FactCandidate]:
     if _looks_like_question(normalize_fact_text(text)):
         return []
-    route = _extract_route(text)
-    return [route] if route is not None else []
+    return _extract_route_segments(text)
 
 
 async def upsert_extracted_facts(
@@ -493,6 +539,10 @@ def _prefer_existing_fact(existing: aiosqlite.Row, candidate: FactCandidate) -> 
 
 
 def _fact_answer_identity(fact: dict[str, Any]) -> str:
+    raw_key = str(fact.get("key", ""))
+    if raw_key.startswith("маршрут:"):
+        return raw_key
+
     key = _canonical_fact_key(str(fact.get("key", "")))
     value = normalize_fact_text(str(fact.get("value", "")))
 
@@ -596,6 +646,65 @@ def _extract_route(text: str) -> FactCandidate | None:
         source_text=text,
         confidence=0.88,
     )
+
+
+def _extract_route_segments(text: str) -> list[FactCandidate]:
+    normalized = normalize_fact_text(text)
+    if _ROUTE_MOTION.search(normalized) is None:
+        return []
+    if "из " not in normalized and "через " not in normalized and "до " not in normalized:
+        return []
+
+    cleaned = _cleanup_route_value(text)
+    if not cleaned:
+        return []
+
+    clauses = [part.strip(" ,") for part in _ROUTE_SPLIT.split(cleaned) if part.strip(" ,")]
+    if not clauses:
+        clauses = [cleaned]
+
+    segments: list[FactCandidate] = []
+    prev_dest_node: str | None = None
+    seen: set[str] = set()
+    for clause in clauses:
+        source_match = _ROUTE_SOURCE.search(clause)
+        dest_matches = [
+            match for match in _ROUTE_DEST.finditer(clause)
+            if not _looks_like_route_non_location(match.group("value"))
+        ]
+        if not dest_matches:
+            continue
+
+        source_node = (
+            _normalize_route_node(source_match.group("value"))
+            if source_match is not None
+            else prev_dest_node
+        )
+        dest_raw = dest_matches[-1].group("value")
+        dest_node = _normalize_route_node(dest_raw)
+        if not source_node or not dest_node or source_node == dest_node:
+            prev_dest_node = dest_node or prev_dest_node
+            continue
+
+        transport = _extract_route_transport(clause)
+        key = _route_fact_key(source_node, dest_node)
+        if key in seen:
+            prev_dest_node = dest_node
+            continue
+
+        segments.append(
+            FactCandidate(
+                category="attribute",
+                key=key,
+                value=_format_route_segment_value(source_node, dest_node, transport=transport),
+                source_text=text,
+                confidence=0.88,
+            )
+        )
+        seen.add(key)
+        prev_dest_node = dest_node
+
+    return segments
 
 
 def _iter_candidate_clauses(text: str) -> list[str]:
@@ -838,6 +947,50 @@ def _cleanup_value(value: str) -> str:
     return " ".join(cleaned.split()).strip(" ,-—")
 
 
+def _route_fact_key(source_node: str, dest_node: str) -> str:
+    return f"маршрут:{source_node}->{dest_node}"
+
+
+def _normalize_route_node(value: str) -> str:
+    normalized = normalize_fact_text(value).replace("ё", "е")
+    normalized = re.sub(r"\s+(?:в|на|до|из|с|от)$", "", normalized)
+    for node, meta in _ROUTE_NODE_ALIASES.items():
+        if normalized in meta["variants"]:
+            return node
+    return normalized.replace(" ", "_")
+
+
+def _route_node_label(node: str, *, case: str) -> str:
+    meta = _ROUTE_NODE_ALIASES.get(node)
+    if meta is not None:
+        return str(meta["from"] if case == "from" else meta["to"])
+
+    label = node.replace("_", " ").strip()
+    if not label:
+        return node
+    return f"{label[:1].upper()}{label[1:]}"
+
+
+def _format_route_segment_value(source_node: str, dest_node: str, *, transport: str = "") -> str:
+    source_label = _route_node_label(source_node, case="from")
+    dest_label = _route_node_label(dest_node, case="to")
+    if transport:
+        return f"из {source_label} {transport} в {dest_label}"
+    return f"из {source_label} в {dest_label}"
+
+
+def _extract_route_transport(text: str) -> str:
+    match = _ROUTE_TRANSPORT.search(text)
+    if not match:
+        return ""
+    return match.group(0).strip()
+
+
+def _looks_like_route_non_location(value: str) -> bool:
+    normalized = normalize_fact_text(value)
+    return any(marker in normalized for marker in _ROUTE_NON_LOCATION_MARKERS)
+
+
 def _cleanup_route_value(value: str) -> str:
     cleaned = " ".join(value.split()).strip(" ,-—")
     cleaned = re.sub(r"\bоттуда уже\b", "оттуда", cleaned, flags=re.IGNORECASE)
@@ -931,6 +1084,8 @@ def _score_fact_row(row: aiosqlite.Row, *, query_tokens: list[str]) -> int:
     return score
 
 def _canonical_fact_key(key: str) -> str:
+    if key.startswith("маршрут:"):
+        return "маршрут"
     if key.endswith(":role"):
         return "роль"
     if key.endswith(":place"):
