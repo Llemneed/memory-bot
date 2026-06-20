@@ -520,6 +520,22 @@ def _display_fact_key(key: str) -> str:
     return labels.get(canonical_key, canonical_key)
 
 
+def _display_fact_key(key: str) -> str:
+    canonical_key = _canonical_fact_key(key)
+    labels = {
+        "работаю": "вахтовый цикл",
+        "роль": "роль / профессия",
+        "живу": "место проживания",
+        "вахта": "длительность вахты",
+        "график": "длительность смены",
+        "режим": "режим / правило",
+        "одна вахта": "чередование вахт",
+        "завтрак с": "расписание питания",
+        "у меня": "режим",
+    }
+    return labels.get(canonical_key, canonical_key)
+
+
 def _canonical_fact_key(key: str) -> str:
     return "роль" if key.endswith(":role") else key
 
