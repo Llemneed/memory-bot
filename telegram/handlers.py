@@ -57,6 +57,28 @@ def _user_wants_structured_reply(text: str) -> bool:
     return any(marker in normalized for marker in markers)
 
 
+def _is_route_query(text: str) -> bool:
+    normalized = normalize_message_text(text)
+    if not normalized:
+        return False
+    markers = (
+        "маршрут",
+        "маршрутом",
+        "добира",
+        "доезжа",
+        "еду",
+        "езжу",
+        "дорог",
+        "путь",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _is_route_fact(fact: dict) -> bool:
+    key = str(fact.get("key", "")).lower()
+    return key == "маршрут" or key.endswith(":place") or key in {"живу"}
+
+
 def _shape_answer_text(answer: str, user_text: str) -> str:
     cleaned = answer.strip()
     if not cleaned or _user_wants_structured_reply(user_text):
@@ -258,9 +280,14 @@ async def handle_message(msg: Message) -> None:
 
     direct_answer_fallback = maybe_build_fact_answer(user_text, direct_fact_hits)
     fact_answer_hits = fresh_fact_hits or direct_fact_hits[: settings.FACTS_TOP_K]
+    route_query = _is_route_query(user_text)
+    if route_query:
+        filtered_route_hits = [fact for fact in fact_answer_hits if _is_route_fact(fact)]
+        if filtered_route_hits:
+            fact_answer_hits = filtered_route_hits
 
     raw_memory_block = ""
-    if not direct_answer_fallback and len(fresh_fact_hits) < 3:
+    if not route_query and not direct_answer_fallback and len(fresh_fact_hits) < 3:
         raw_memory_block = build_memory_block(retrieved)
 
     if direct_answer_fallback:

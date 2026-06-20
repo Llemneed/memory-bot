@@ -58,6 +58,10 @@ _TOPIC_VALUE = re.compile(
     r"^(?P<key>[A-Za-zА-Яа-яЁё-]+(?:\s+[A-Za-zА-Яа-яЁё-]+){0,1})\s+(?P<value>[^.!?\n]+)$",
     re.IGNORECASE,
 )
+_ROUTE_MOTION = re.compile(
+    r"\b(еду|езжу|добираюсь|доезжаю|лечу|летаю|выезжаю|отправляюсь)\b",
+    re.IGNORECASE,
+)
 _STOPWORDS = {
     "есть",
     "это",
@@ -98,6 +102,9 @@ def extract_facts(text: str) -> list[FactCandidate]:
         return []
 
     seen: dict[tuple[str, str], FactCandidate] = {}
+    for candidate in _extract_document_facts(source):
+        seen[(candidate.category, candidate.key)] = candidate
+
     for clause in _iter_candidate_clauses(source):
         raw_clause = clause.strip()
         normalized = normalize_fact_text(raw_clause)
@@ -122,6 +129,11 @@ def extract_facts(text: str) -> list[FactCandidate]:
             seen[(candidate.category, candidate.key)] = candidate
 
     return list(seen.values())
+
+
+def _extract_document_facts(text: str) -> list[FactCandidate]:
+    route = _extract_route(text)
+    return [route] if route is not None else []
 
 
 async def upsert_extracted_facts(
@@ -276,6 +288,7 @@ def build_fact_answer_block(facts: list[dict[str, Any]]) -> str:
 def _fact_label_for_display(key: str) -> str:
     canonical_key = _canonical_fact_key(key)
     labels = {
+        "маршрут": "маршрут",
         "работаю": "вахтовый цикл",
         "роль": "роль / профессия",
         "живу": "место проживания",
@@ -307,6 +320,26 @@ def _extract_clause_facts(text: str) -> list[FactCandidate | None]:
         if candidate is not None:
             return [candidate]
     return []
+
+
+def _extract_route(text: str) -> FactCandidate | None:
+    normalized = normalize_fact_text(text)
+    if _ROUTE_MOTION.search(normalized) is None:
+        return None
+    if "из " not in normalized and "через " not in normalized and "до " not in normalized:
+        return None
+
+    cleaned = _cleanup_route_value(text)
+    if not cleaned or len(cleaned.split()) < 4:
+        return None
+
+    return FactCandidate(
+        category="attribute",
+        key="маршрут",
+        value=cleaned,
+        source_text=text,
+        confidence=0.88,
+    )
 
 
 def _iter_candidate_clauses(text: str) -> list[str]:
@@ -503,6 +536,19 @@ def _cleanup_value(value: str) -> str:
     return " ".join(cleaned.split()).strip(" ,-—")
 
 
+def _cleanup_route_value(value: str) -> str:
+    cleaned = " ".join(value.split()).strip(" ,-—")
+    cleaned = re.sub(r"\bоттуда уже\b", "оттуда", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"\b(?:сначала,?\s*)?я\s+(еду|езжу|добираюсь|доезжаю|лечу|летаю)\b",
+        r"\1",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\s+,", ",", cleaned)
+    return cleaned.strip(" .,!?:;")
+
+
 def _looks_like_named_entity(token: str) -> bool:
     if not token:
         return False
@@ -540,6 +586,8 @@ def _looks_like_topic_value(text: str) -> bool:
     if not key or not value:
         return False
     if len(key) <= 1:
+        return False
+    if key in {"место", "оттуда", "оттуда уже", "туда", "сюда", "здесь"}:
         return False
     if key in {"день", "дни", "месяц", "месяцы", "час", "часы", "число", "числа"}:
         return False
@@ -640,6 +688,21 @@ def _intent_adjustment(row: aiosqlite.Row, *, query_tokens: list[str]) -> int:
     canonical_key = _canonical_fact_key(row["fact_key"])
     token_set = set(query_tokens)
 
+    asks_about_route = bool(
+        token_set
+        & {
+            "маршрут",
+            "маршрутом",
+            "добираюсь",
+            "добраться",
+            "доезжаю",
+            "еду",
+            "езжу",
+            "путь",
+            "дорога",
+            "образом",
+        }
+    )
     asks_about_method = bool(
         token_set
         & {"метод", "методу", "график", "графику", "расписание", "расписанию", "вахта", "вахтовый", "смена", "смены"}
@@ -652,6 +715,18 @@ def _intent_adjustment(row: aiosqlite.Row, *, query_tokens: list[str]) -> int:
     )
 
     score = 0
+    if asks_about_route:
+        if canonical_key == "маршрут":
+            score += 9
+        elif canonical_key == "место работы":
+            score += 4
+        elif canonical_key == "живу":
+            score += 2
+        elif row["category"] == "state":
+            score -= 3
+        else:
+            score -= 1
+
     if asks_about_method:
         if row["category"] == "state" or canonical_key in {"работаю", "график", "режим", "одна вахта", "завтрак с", "у меня"}:
             score += 4
@@ -667,6 +742,8 @@ def _intent_adjustment(row: aiosqlite.Row, *, query_tokens: list[str]) -> int:
     if asks_about_place:
         if canonical_key == "живу":
             score += 5
+        elif canonical_key == "место работы":
+            score += 4
         elif canonical_key == "роль":
             score -= 1
 
