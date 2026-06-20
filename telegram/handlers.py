@@ -76,7 +76,7 @@ def _is_route_query(text: str) -> bool:
 
 def _is_route_fact(fact: dict) -> bool:
     key = str(fact.get("key", "")).lower()
-    return key == "маршрут" or key.endswith(":place") or key in {"живу"}
+    return key == "маршрут" or key.endswith(":place")
 
 
 def _shape_answer_text(answer: str, user_text: str) -> str:
