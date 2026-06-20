@@ -64,6 +64,56 @@ async def safe_answer(msg: Message, text: str) -> bool:
     return False
 
 
+def split_for_telegram(text: str) -> list[str]:
+    limit = max(1, settings.TELEGRAM_MAX_MESSAGE_CHARS)
+    normalized = text.strip()
+    if not normalized:
+        return [""]
+    if len(normalized) <= limit:
+        return [normalized]
+
+    chunks: list[str] = []
+    remaining = normalized
+    while len(remaining) > limit:
+        window = remaining[:limit]
+        split_at = max(
+            window.rfind("\n\n"),
+            window.rfind("\n"),
+            window.rfind(". "),
+            window.rfind("! "),
+            window.rfind("? "),
+            window.rfind(" "),
+        )
+        if split_at < limit // 2:
+            split_at = limit
+
+        chunk = remaining[:split_at].strip()
+        if not chunk:
+            chunk = remaining[:limit]
+            split_at = limit
+
+        chunks.append(chunk)
+        remaining = remaining[split_at:].lstrip()
+
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
+async def safe_answer_chunks(msg: Message, text: str) -> bool:
+    chunks = split_for_telegram(text)
+    for index, chunk in enumerate(chunks, start=1):
+        if not await safe_answer(msg, chunk):
+            log.warning(
+                "Failed to deliver chunk %d/%d to user=%s",
+                index,
+                len(chunks),
+                msg.from_user.id if msg.from_user else "?",
+            )
+            return False
+    return True
+
+
 @router.message(CommandStart())
 async def cmd_start(msg: Message) -> None:
     await safe_answer(
@@ -147,7 +197,7 @@ async def handle_message(msg: Message) -> None:
         await safe_answer(msg, f"⚠️ {exc}")
         return
 
-    if not await safe_answer(msg, answer):
+    if not await safe_answer_chunks(msg, answer):
         log.warning("Failed to deliver assistant response to user=%s", user_id)
         return
 

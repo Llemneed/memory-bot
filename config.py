@@ -1,5 +1,5 @@
 """
-Конфигурация бота через .env
+Bot configuration via .env.
 """
 from __future__ import annotations
 
@@ -14,18 +14,19 @@ class Settings(BaseSettings):
     G4F_PROXY: str = ""
     G4F_PROVIDER_ORDER: str = "PollinationsAI,DeepInfra,HuggingChat,You,Auto"
     G4F_WEB_SEARCH: bool = False
-    LLM_TIMEOUT: int = 60          # секунд на один запрос к провайдеру
-    LLM_MAX_RETRIES: int = 5       # сколько провайдеров пробовать
+    LLM_TIMEOUT: int = 60
+    LLM_MAX_RETRIES: int = 5
 
-    # Память
-    HISTORY_LAST_N: int = 10       # сообщений в short-term окне
-    RETRIEVAL_TOP_K: int = 5       # сколько результатов из FTS5
-    FACTS_TOP_K: int = 5           # сколько фактов поднимать из facts-store
-    MAX_CONTEXT_CHARS: int = 6000  # лимит символов в retrieval-блоке
+    # Memory
+    HISTORY_LAST_N: int = 10
+    RETRIEVAL_TOP_K: int = 5
+    FACTS_TOP_K: int = 5
+    MAX_CONTEXT_CHARS: int = 6000
+    TELEGRAM_MAX_MESSAGE_CHARS: int = 3500
     MESSAGE_BURST_DEDUP_SECONDS: int = 5
     MESSAGE_STORAGE_DEDUP_SECONDS: int = 30
 
-    # БД
+    # DB
     DB_PATH: str = "database/sqlite.db"
 
     class Config:
