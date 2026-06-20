@@ -10,7 +10,7 @@ def maybe_build_fact_answer(query: str, facts: list[dict]) -> str | None:
     token_set = set(_query_tokens(query))
     fact_map = _fact_map(facts)
 
-    asks_role = bool(token_set & {"кем", "работаю", "профессия", "роль"})
+    asks_role = bool(token_set & {"кем", "профессия", "роль", "должность"})
     asks_place = bool(token_set & {"где", "живу", "мессояхе", "мессояхском", "месторождении"})
     asks_method = bool(
         token_set
