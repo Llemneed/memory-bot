@@ -20,7 +20,7 @@ def maybe_build_fact_answer(query: str, facts: list[dict]) -> str | None:
     mentions_food = bool(token_set & {"ужин", "завтрак", "обед", "питание"})
 
     if asks_role and fact_map.get("роль"):
-        return f"Вы — {fact_map['роль']}."
+        return f"Вы работаете {fact_map['роль']}."
 
     if asks_why_day_night and fact_map.get("вахта") and fact_map.get("одна вахта"):
         lines = ["Коротко по твоим данным:"]

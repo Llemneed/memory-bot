@@ -189,10 +189,17 @@ async def handle_message(msg: Message) -> None:
     db = await get_db()
     try:
         fresh_fact_hits = await retrieve_facts(db, user_id=user_id, dialog_id=dialog_id, query=user_text)
+        direct_fact_hits = await retrieve_facts(
+            db,
+            user_id=user_id,
+            dialog_id=dialog_id,
+            query=user_text,
+            top_k=20,
+        )
     finally:
         await db.close()
 
-    direct_answer = maybe_build_fact_answer(user_text, fresh_fact_hits)
+    direct_answer = maybe_build_fact_answer(user_text, direct_fact_hits)
     if direct_answer:
         if not await safe_answer_chunks(msg, direct_answer):
             log.warning("Failed to deliver direct fact response to user=%s", user_id)
