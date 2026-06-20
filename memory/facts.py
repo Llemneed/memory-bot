@@ -748,6 +748,29 @@ def _extract_predicate(text: str) -> FactCandidate | None:
     return FactCandidate(category=category, key=key, value=value, source_text=text)
 
 
+def _extract_predicate(text: str) -> FactCandidate | None:
+    match = _VERB_PREDICATE.match(text) or _BARE_VERB_PREDICATE.match(text)
+    if not match:
+        return None
+
+    verb = _normalize_key(match.group("verb"))
+    value = _cleanup_value(match.group("value"))
+    if not verb or not value:
+        return None
+
+    category = "state" if _looks_like_temporal_state(value) else "attribute"
+    key = verb
+    if category == "attribute" and _looks_like_role(value):
+        key = "роль"
+    elif category == "attribute" and _looks_like_location_phrase(value):
+        key = f"{verb}:place"
+        cleaned_place = _cleanup_work_place_value(value)
+        if cleaned_place:
+            value = cleaned_place
+
+    return FactCandidate(category=category, key=key, value=value, source_text=text)
+
+
 def _extract_topic_value(text: str) -> FactCandidate | None:
     match = _TOPIC_VALUE.match(text)
     if not match:
@@ -826,6 +849,13 @@ def _cleanup_route_value(value: str) -> str:
     )
     cleaned = re.sub(r"\s+,", ",", cleaned)
     return cleaned.strip(" .,!?:;")
+
+
+def _cleanup_work_place_value(value: str) -> str:
+    cleaned = " ".join(value.split()).strip(" ,-вЂ”")
+    cleaned = re.split(r"\s+и\s+туда\b", cleaned, maxsplit=1, flags=re.IGNORECASE)[0].strip(" ,.")
+    cleaned = re.split(r"\s+а\s+туда\b", cleaned, maxsplit=1, flags=re.IGNORECASE)[0].strip(" ,.")
+    return cleaned
 
 
 def _looks_like_named_entity(token: str) -> bool:
