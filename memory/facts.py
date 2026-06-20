@@ -294,18 +294,22 @@ def _prepare_fact_answer_facts(facts: list[dict[str, Any]]) -> list[dict[str, An
 
     identities = [_fact_answer_identity(fact) for fact in facts]
     has_shift_duration = "график" in identities
-    prepared: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    prepared_by_identity: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
 
     for fact, identity in zip(facts, identities):
         if identity == "режим" and has_shift_duration:
             continue
-        if identity in seen:
+        candidate = {**fact, "_display_key": identity}
+        current = prepared_by_identity.get(identity)
+        if current is None:
+            prepared_by_identity[identity] = candidate
+            order.append(identity)
             continue
-        seen.add(identity)
-        prepared.append({**fact, "_display_key": identity})
+        if _prefer_fact_answer_candidate(candidate, current, identity):
+            prepared_by_identity[identity] = candidate
 
-    return prepared
+    return [prepared_by_identity[identity] for identity in order]
 
 
 def _fact_answer_identity(fact: dict[str, Any]) -> str:
@@ -323,6 +327,38 @@ def _fact_answer_identity(fact: dict[str, Any]) -> str:
         return "график"
 
     return key
+
+
+def _prefer_fact_answer_candidate(
+    candidate: dict[str, Any],
+    current: dict[str, Any],
+    identity: str,
+) -> bool:
+    candidate_value = normalize_fact_text(str(candidate.get("value", "")))
+    current_value = normalize_fact_text(str(current.get("value", "")))
+
+    if identity == "график":
+        candidate_is_compact = bool(re.fullmatch(r"\d{1,2}\s+час(?:а|ов)?", candidate_value))
+        current_is_compact = bool(re.fullmatch(r"\d{1,2}\s+час(?:а|ов)?", current_value))
+        if candidate_is_compact != current_is_compact:
+            return candidate_is_compact
+
+    if identity == "одна вахта":
+        candidate_mentions_day_night = "день" in candidate_value and "ноч" in candidate_value
+        current_mentions_day_night = "день" in current_value and "ноч" in current_value
+        if candidate_mentions_day_night != current_mentions_day_night:
+            return candidate_mentions_day_night
+
+    if identity == "вахта":
+        candidate_is_compact = len(candidate_value.split()) <= 3
+        current_is_compact = len(current_value.split()) <= 3
+        if candidate_is_compact != current_is_compact:
+            return candidate_is_compact
+
+    if len(candidate_value) != len(current_value):
+        return len(candidate_value) < len(current_value)
+
+    return float(candidate.get("confidence", 0) or 0) > float(current.get("confidence", 0) or 0)
 
 
 def _fact_label_for_display(key: str) -> str:
