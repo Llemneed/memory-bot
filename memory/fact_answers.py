@@ -12,11 +12,22 @@ def maybe_build_fact_answer(query: str, facts: list[dict]) -> str | None:
 
     asks_role = bool(token_set & {"кем", "профессия", "роль", "должность"})
     asks_place = bool(token_set & {"где", "живу", "мессояхе", "мессояхском", "месторождении"})
-    asks_method = bool(
-        token_set
-        & {"метод", "график", "расписание", "вахта", "вахтовый", "смена", "смены"}
+    asks_method = (
+        _has_prefix(token_set, "метод")
+        or _has_prefix(token_set, "график")
+        or _has_prefix(token_set, "расписан")
+        or _has_prefix(token_set, "вахт")
+        or _has_prefix(token_set, "смен")
     )
-    asks_why_day_night = bool(token_set & {"почему", "день", "ночь", "ночную", "дневную"})
+    asks_why_day_night = (
+        "почему" in token_set
+        and (
+            "день" in token_set
+            or "ночь" in token_set
+            or _has_prefix(token_set, "ночн")
+            or _has_prefix(token_set, "дневн")
+        )
+    )
     mentions_food = bool(token_set & {"ужин", "завтрак", "обед", "питание"})
 
     if asks_role and fact_map.get("роль"):
@@ -84,3 +95,7 @@ def _canonical_fact_key(key: str) -> str:
 def _query_tokens(query: str) -> list[str]:
     normalized = " ".join(query.split()).strip().lower()
     return [token for token in re.findall(r"[\w-]+", normalized) if len(token) > 2]
+
+
+def _has_prefix(tokens: set[str], prefix: str) -> bool:
+    return any(token.startswith(prefix) for token in tokens)
