@@ -8,10 +8,10 @@ services:
       TELEGRAM_PROXY: ${TELEGRAM_PROXY:-}
       G4F_MODEL: ${G4F_MODEL:-gpt-4o-mini}
       G4F_PROXY: ${G4F_PROXY:-}
-      G4F_PROVIDER_ORDER: ${G4F_PROVIDER_ORDER:-PollinationsAI,DeepInfra,HuggingChat,You,Auto}
+      G4F_PROVIDER_ORDER: ${G4F_PROVIDER_ORDER:-OpenaiChat,Copilot,DeepInfra,Gemini,Grok,MetaAI,DeepSeek,PollinationsAI,HuggingChat,You,Auto}
       G4F_WEB_SEARCH: ${G4F_WEB_SEARCH:-false}
       LLM_TIMEOUT: ${LLM_TIMEOUT:-60}
-      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-5}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-10}
       HISTORY_LAST_N: ${HISTORY_LAST_N:-10}
       RETRIEVAL_TOP_K: ${RETRIEVAL_TOP_K:-5}
       MAX_CONTEXT_CHARS: ${MAX_CONTEXT_CHARS:-6000}

@@ -12,10 +12,13 @@ class Settings(BaseSettings):
     # LLM
     G4F_MODEL: str = "gpt-4o-mini"
     G4F_PROXY: str = ""
-    G4F_PROVIDER_ORDER: str = "PollinationsAI,DeepInfra,HuggingChat,You,Auto"
+    G4F_PROVIDER_ORDER: str = (
+        "OpenaiChat,Copilot,DeepInfra,Gemini,Grok,MetaAI,DeepSeek,"
+        "PollinationsAI,HuggingChat,You,Auto"
+    )
     G4F_WEB_SEARCH: bool = False
     LLM_TIMEOUT: int = 60
-    LLM_MAX_RETRIES: int = 5
+    LLM_MAX_RETRIES: int = 10
 
     # Memory
     HISTORY_LAST_N: int = 10
