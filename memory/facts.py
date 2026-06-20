@@ -288,6 +288,35 @@ def build_fact_answer_block(facts: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def expand_fact_answer_hits(
+    facts: list[dict[str, Any]],
+    *,
+    active_facts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not facts:
+        return []
+
+    identities = {_fact_answer_identity(fact) for fact in facts}
+    expanded: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for fact in [*facts, *active_facts]:
+        identity = _fact_answer_identity(fact)
+        if identity not in identities:
+            continue
+        marker = (
+            str(fact.get("category", "")),
+            str(fact.get("key", "")),
+            str(fact.get("value", "")),
+        )
+        if marker in seen:
+            continue
+        seen.add(marker)
+        expanded.append(fact)
+
+    return expanded
+
+
 def _prepare_fact_answer_facts(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not facts:
         return []

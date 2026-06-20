@@ -20,6 +20,7 @@ from memory.fact_answers import maybe_build_fact_answer
 from memory.facts import (
     build_fact_answer_block,
     build_fact_block,
+    expand_fact_answer_hits,
     list_active_facts,
     retrieve_facts,
     upsert_extracted_facts,
@@ -280,6 +281,11 @@ async def handle_message(msg: Message) -> None:
 
     direct_answer_fallback = maybe_build_fact_answer(user_text, direct_fact_hits)
     fact_answer_hits = fresh_fact_hits or direct_fact_hits[: settings.FACTS_TOP_K]
+    if direct_answer_fallback:
+        fact_answer_hits = expand_fact_answer_hits(
+            fact_answer_hits,
+            active_facts=direct_fact_hits,
+        )
     route_query = _is_route_query(user_text)
     if route_query:
         filtered_route_hits = [fact for fact in fact_answer_hits if _is_route_fact(fact)]
