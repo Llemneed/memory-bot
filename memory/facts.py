@@ -217,6 +217,38 @@ async def retrieve_facts(
     ]
 
 
+async def list_active_facts(
+    db: aiosqlite.Connection,
+    *,
+    user_id: int,
+    dialog_id: str,
+) -> list[dict[str, Any]]:
+    async with db.execute(
+        """
+        SELECT category, fact_key, fact_value, confidence, source_text, updated_at
+        FROM facts
+        WHERE user_id = ?
+          AND dialog_id = ?
+          AND status = 'active'
+        ORDER BY updated_at DESC
+        """,
+        (user_id, dialog_id),
+    ) as cur:
+        rows = await cur.fetchall()
+
+    return [
+        {
+            "category": row["category"],
+            "key": row["fact_key"],
+            "value": row["fact_value"],
+            "confidence": row["confidence"],
+            "source_text": row["source_text"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
 def build_fact_block(facts: list[dict[str, Any]]) -> str:
     if not facts:
         return ""

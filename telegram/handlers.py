@@ -16,7 +16,7 @@ from llm.prompts import build_system_prompt
 from memory.constraints import trim_history, trim_retrieval_block
 from memory.context_builder import build_memory_block
 from memory.fact_answers import maybe_build_fact_answer
-from memory.facts import build_fact_block, retrieve_facts, upsert_extracted_facts
+from memory.facts import build_fact_block, list_active_facts, retrieve_facts, upsert_extracted_facts
 from memory.retrieval import retrieve
 
 log = logging.getLogger(__name__)
@@ -189,13 +189,7 @@ async def handle_message(msg: Message) -> None:
     db = await get_db()
     try:
         fresh_fact_hits = await retrieve_facts(db, user_id=user_id, dialog_id=dialog_id, query=user_text)
-        direct_fact_hits = await retrieve_facts(
-            db,
-            user_id=user_id,
-            dialog_id=dialog_id,
-            query=user_text,
-            top_k=20,
-        )
+        direct_fact_hits = await list_active_facts(db, user_id=user_id, dialog_id=dialog_id)
     finally:
         await db.close()
 
