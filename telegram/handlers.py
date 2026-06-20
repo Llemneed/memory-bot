@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 
 from aiogram import Router
@@ -36,6 +37,57 @@ RECENT_INPUTS_LOCK = asyncio.Lock()
 
 def _dialog_id(user_id: int) -> str:
     return f"dialog_{user_id}"
+
+
+def _user_wants_structured_reply(text: str) -> bool:
+    normalized = normalize_message_text(text)
+    if not normalized:
+        return False
+    markers = (
+        "спис",
+        "пункт",
+        "шаг",
+        "по шаг",
+        "вариант",
+        "сравн",
+        "таблиц",
+        "чеклист",
+        "план",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _shape_answer_text(answer: str, user_text: str) -> str:
+    cleaned = answer.strip()
+    if not cleaned or _user_wants_structured_reply(user_text):
+        return cleaned
+
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    bullet_lines = [line for line in lines if line.startswith(("-", "•", "*"))]
+    if not bullet_lines:
+        return cleaned
+
+    heading = ""
+    content_lines = lines
+    if lines and lines[0].endswith(":") and len(lines[0]) < 80:
+        heading = lines[0][:-1].strip()
+        content_lines = lines[1:]
+
+    if not content_lines or not all(line.startswith(("-", "•", "*")) for line in content_lines):
+        return cleaned
+
+    items = [re.sub(r"^[-•*]\s*", "", line).strip(" .;") for line in content_lines]
+    items = [item for item in items if item]
+    if not items:
+        return cleaned
+
+    if heading:
+        sentence = f"{heading}: " + "; ".join(items) + "."
+    else:
+        sentence = ". ".join(items)
+        if not sentence.endswith((".", "!", "?")):
+            sentence += "."
+    return sentence
 
 
 async def should_drop_burst_duplicate(user_id: int, text: str) -> bool:
@@ -248,6 +300,8 @@ async def handle_message(msg: Message) -> None:
 
         await safe_answer(msg, f"⚠️ {exc}")
         return
+
+    answer = _shape_answer_text(answer, user_text)
 
     if not await safe_answer_chunks(msg, answer):
         log.warning("Failed to deliver assistant response to user=%s", user_id)
