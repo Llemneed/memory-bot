@@ -262,12 +262,24 @@ def build_fact_block(facts: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def build_fact_answer_block(facts: list[dict[str, Any]]) -> str:
+    if not facts:
+        return ""
+
+    lines = ["=== Facts for this answer ==="]
+    for fact in facts:
+        lines.append(f"- {_fact_label_for_display(fact['key'])}: {fact['value']}")
+    lines.append("=== End answer facts ===")
+    return "\n".join(lines)
+
+
 def _fact_label_for_display(key: str) -> str:
     canonical_key = _canonical_fact_key(key)
     labels = {
         "работаю": "вахтовый цикл",
         "роль": "роль / профессия",
         "живу": "место проживания",
+        "место работы": "место работы",
         "вахта": "длительность вахты",
         "график": "длительность смены",
         "режим": "режим / правило",
@@ -542,10 +554,11 @@ def _query_tokens(query: str) -> list[str]:
 
 def _score_fact_row(row: aiosqlite.Row, *, query_tokens: list[str]) -> int:
     canonical_key = _canonical_fact_key(row["fact_key"])
+    raw_key = normalize_fact_text(row["fact_key"])
     haystack = normalize_fact_text(
-        f"{row['category']} {canonical_key} {row['fact_value']} {row['source_text']}"
+        f"{row['category']} {raw_key} {canonical_key} {row['fact_value']} {row['source_text']}"
     )
-    score = sum(2 if token == canonical_key else 1 for token in query_tokens if token in haystack)
+    score = sum(2 if token in {canonical_key, raw_key} else 1 for token in query_tokens if token in haystack)
     score += _intent_adjustment(row, query_tokens=query_tokens)
     if score == 0 and not query_tokens:
         return 1
@@ -601,7 +614,11 @@ def _display_fact_key(key: str) -> str:
 
 
 def _canonical_fact_key(key: str) -> str:
-    return "роль" if key.endswith(":role") else key
+    if key.endswith(":role"):
+        return "роль"
+    if key.endswith(":place"):
+        return "место работы"
+    return key
 
 
 def _display_fact_key(key: str) -> str:

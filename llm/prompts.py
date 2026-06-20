@@ -68,8 +68,18 @@ When clarification is needed:
 - For vague, accidental, or fragmentary messages, clarify instead of improvising a big answer.
 """
 
+FACT_ANSWER_RULES = """\
+Fact-based answer mode:
+- The user is asking about remembered facts.
+- Build a normal Russian answer from the provided facts instead of echoing raw fact lines.
+- Do not quote field labels unless the user explicitly asked for a structured list.
+- Prefer 1-2 smooth sentences over a fact dump.
+- If the user asks two related sub-questions, answer both briefly in a natural flow.
+- If one detail is known and another is missing, say both plainly without guessing.
+"""
 
-def build_system_prompt(memory_block: str) -> str:
+
+def build_system_prompt(memory_block: str, *, fact_answer_mode: bool = False) -> str:
     """Attach memory context to the base prompt when it exists."""
     sections = [
         BASE_SYSTEM,
@@ -78,6 +88,8 @@ def build_system_prompt(memory_block: str) -> str:
         INTERPRETATION_RULES,
         CLARIFICATION_RULES,
     ]
+    if fact_answer_mode:
+        sections.append(FACT_ANSWER_RULES)
     base_prompt = "\n\n".join(sections)
     if not memory_block:
         return base_prompt

@@ -16,7 +16,13 @@ from llm.prompts import build_system_prompt
 from memory.constraints import trim_history, trim_retrieval_block
 from memory.context_builder import build_memory_block
 from memory.fact_answers import maybe_build_fact_answer
-from memory.facts import build_fact_block, list_active_facts, retrieve_facts, upsert_extracted_facts
+from memory.facts import (
+    build_fact_answer_block,
+    build_fact_block,
+    list_active_facts,
+    retrieve_facts,
+    upsert_extracted_facts,
+)
 from memory.retrieval import retrieve
 
 log = logging.getLogger(__name__)
@@ -193,26 +199,21 @@ async def handle_message(msg: Message) -> None:
     finally:
         await db.close()
 
-    direct_answer = maybe_build_fact_answer(user_text, direct_fact_hits)
-    if direct_answer:
-        if not await safe_answer_chunks(msg, direct_answer):
-            log.warning("Failed to deliver direct fact response to user=%s", user_id)
-            return
-
-        db = await get_db()
-        try:
-            await save_message(db, user_id=user_id, dialog_id=dialog_id, role="assistant", text=direct_answer)
-        finally:
-            await db.close()
-        return
+    direct_answer_fallback = maybe_build_fact_answer(user_text, direct_fact_hits)
+    fact_answer_hits = fresh_fact_hits or direct_fact_hits[: settings.FACTS_TOP_K]
 
     raw_memory_block = ""
-    if len(fresh_fact_hits) < 3:
+    if not direct_answer_fallback and len(fresh_fact_hits) < 3:
         raw_memory_block = build_memory_block(retrieved)
 
-    memory_parts = [build_fact_block(fresh_fact_hits), raw_memory_block]
+    if direct_answer_fallback:
+        fact_memory_block = build_fact_answer_block(fact_answer_hits)
+    else:
+        fact_memory_block = build_fact_block(fresh_fact_hits)
+
+    memory_parts = [fact_memory_block, raw_memory_block]
     memory_block = trim_retrieval_block("\n\n".join(part for part in memory_parts if part))
-    system_prompt = build_system_prompt(memory_block)
+    system_prompt = build_system_prompt(memory_block, fact_answer_mode=bool(direct_answer_fallback))
     messages = trim_history(
         [{"role": "system", "content": system_prompt}] +
         history +
@@ -227,6 +228,24 @@ async def handle_message(msg: Message) -> None:
     try:
         answer = await complete(messages)
     except RuntimeError as exc:
+        if direct_answer_fallback:
+            if not await safe_answer_chunks(msg, direct_answer_fallback):
+                log.warning("Failed to deliver direct fact fallback to user=%s", user_id)
+                return
+
+            db = await get_db()
+            try:
+                await save_message(
+                    db,
+                    user_id=user_id,
+                    dialog_id=dialog_id,
+                    role="assistant",
+                    text=direct_answer_fallback,
+                )
+            finally:
+                await db.close()
+            return
+
         await safe_answer(msg, f"⚠️ {exc}")
         return
 
