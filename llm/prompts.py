@@ -29,6 +29,10 @@ Conversation behavior:
 - Do not greet again, re-introduce yourself, or act like this is a brand-new conversation after the first turn.
 - For very short, vague, mistyped, or accidental messages, ask one short clarification question instead of restarting the conversation.
 - Keep replies practical, grounded, and low-drama by default.
+- Interpret memory fields carefully:
+  - role / profession is not the same as work method.
+  - work method / work cycle refers to things like rotational work, month-on-month, shift pattern, or schedule.
+  - place of living / location is separate from profession and separate from schedule.
 """
 
 

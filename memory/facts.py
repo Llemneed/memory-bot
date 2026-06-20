@@ -221,7 +221,9 @@ def build_fact_block(facts: list[dict[str, Any]]) -> str:
 
     lines = ["=== Confirmed facts ==="]
     for fact in facts:
-        lines.append(f"- [{fact['category']}] {fact['key']}: {fact['value']}")
+        lines.append(
+            f"- [{fact['category']}] {_display_fact_key(fact['key'])}: {fact['value']}"
+        )
     lines.append("=== End facts ===")
     return "\n".join(lines)
 
@@ -485,10 +487,68 @@ def _query_tokens(query: str) -> list[str]:
 
 
 def _score_fact_row(row: aiosqlite.Row, *, query_tokens: list[str]) -> int:
+    canonical_key = _canonical_fact_key(row["fact_key"])
     haystack = normalize_fact_text(
-        f"{row['category']} {row['fact_key']} {row['fact_value']} {row['source_text']}"
+        f"{row['category']} {canonical_key} {row['fact_value']} {row['source_text']}"
     )
-    score = sum(2 if token == row["fact_key"] else 1 for token in query_tokens if token in haystack)
+    score = sum(2 if token == canonical_key else 1 for token in query_tokens if token in haystack)
+    score += _intent_adjustment(row, query_tokens=query_tokens)
     if score == 0 and not query_tokens:
         return 1
+    return score
+
+
+def _canonical_fact_key(key: str) -> str:
+    return "роль" if key.endswith(":role") else key
+
+
+def _display_fact_key(key: str) -> str:
+    canonical_key = _canonical_fact_key(key)
+    labels = {
+        "работаю": "метод / цикл работы",
+        "роль": "роль / профессия",
+        "живу": "место проживания",
+        "график": "длительность смены",
+        "режим": "режим / правило",
+        "одна вахта": "чередование смен",
+        "завтрак с": "расписание питания",
+        "у меня": "режим",
+    }
+    return labels.get(canonical_key, canonical_key)
+
+
+def _intent_adjustment(row: aiosqlite.Row, *, query_tokens: list[str]) -> int:
+    canonical_key = _canonical_fact_key(row["fact_key"])
+    token_set = set(query_tokens)
+
+    asks_about_method = bool(
+        token_set
+        & {"метод", "методу", "график", "графику", "расписание", "расписанию", "вахта", "вахтовый", "смена", "смены"}
+    )
+    asks_about_role = bool(
+        token_set & {"роль", "профессия", "профессию", "работа", "работаю", "электромонтер", "кем"}
+    )
+    asks_about_place = bool(
+        token_set & {"где", "живу", "место", "месторождение", "мессояхе", "мессояхском"}
+    )
+
+    score = 0
+    if asks_about_method:
+        if row["category"] == "state" or canonical_key in {"работаю", "график", "режим", "одна вахта", "завтрак с", "у меня"}:
+            score += 4
+        if canonical_key == "роль":
+            score -= 4
+
+    if asks_about_role:
+        if canonical_key == "роль":
+            score += 5
+        elif row["category"] == "state":
+            score -= 1
+
+    if asks_about_place:
+        if canonical_key == "живу":
+            score += 5
+        elif canonical_key == "роль":
+            score -= 1
+
     return score
