@@ -940,21 +940,6 @@ def _canonical_fact_key(key: str) -> str:
     return key
 
 
-def _display_fact_key(key: str) -> str:
-    canonical_key = _canonical_fact_key(key)
-    labels = {
-        "работаю": "вахтовый цикл",
-        "роль": "роль / профессия",
-        "живу": "место проживания",
-        "график": "длительность смены",
-        "режим": "режим / правило",
-        "одна вахта": "чередование дневной и ночной смены",
-        "завтрак с": "расписание питания",
-        "у меня": "режим",
-    }
-    return labels.get(canonical_key, canonical_key)
-
-
 def _intent_adjustment(row: aiosqlite.Row, *, query_tokens: list[str]) -> int:
     canonical_key = _canonical_fact_key(row["fact_key"])
     token_set = set(query_tokens)
