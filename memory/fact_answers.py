@@ -11,14 +11,16 @@ def maybe_build_fact_answer(query: str, facts: list[dict]) -> str | None:
     query_text = _normalize_text(query)
     fact_map = _fact_map(facts)
 
-    asks_role = bool(query_tokens & {"кем", "профессия", "роль", "должность"})
     asks_where = "где" in query_tokens
+    asks_role = bool(query_tokens & {"кем", "профессия", "роль", "должность"})
+    asks_profession = bool(query_tokens & {"профессия", "должность"})
     asks_work_place = asks_where and any(token.startswith("работ") for token in query_tokens)
     asks_home_place = asks_where and (
         any(token.startswith("жив") for token in query_tokens)
         or any(token.startswith("прожив") for token in query_tokens)
         or "дом" in query_tokens
     )
+    asks_work_stay = asks_home_place and "работе" in query_tokens
     asks_method = (
         _has_prefix(query_tokens, "метод")
         or _has_prefix(query_tokens, "график")
@@ -43,21 +45,35 @@ def maybe_build_fact_answer(query: str, facts: list[dict]) -> str | None:
     )
 
     if asks_role and fact_map.get("роль"):
-        return f"Ты {_role_nominative(fact_map['роль'])}."
+        if asks_profession:
+            return f"По профессии ты {_role_nominative(fact_map['роль'])}."
+        return f"Работаешь {fact_map['роль']}."
+
+    if asks_work_stay:
+        work_place = fact_map.get("место_работы")
+        if work_place:
+            return (
+                f"На работе ты {_work_place_tail(work_place)}. "
+                "Где именно там живешь, ты отдельно не уточнял."
+            )
+        return "Где именно живешь на работе, ты отдельно не говорил."
 
     if asks_work_place:
         work_place = fact_map.get("место_работы")
         if work_place:
             return f"Работаешь {_work_place_tail(work_place)}."
         if fact_map.get("живу"):
-            return f"Отдельно место работы ты не называл. Знаю только, что живешь {_place_tail(fact_map['живу'])}."
+            return (
+                "Отдельно место работы ты не называл. "
+                f"Знаю только, что живешь {_place_tail(fact_map['живу'])}."
+            )
         return "Отдельно место работы ты не называл."
 
     if asks_home_place and fact_map.get("живу"):
         return f"Живешь {_place_tail(fact_map['живу'])}."
 
     if asks_why_day_night and fact_map.get("одна вахта"):
-        parts = [f"Потому что {_watch_alternation_sentence(fact_map['одна вахта'], leading=False)}."]
+        parts = [f"Потому что {_watch_alternation_clause(fact_map['одна вахта'])}."]
         if fact_map.get("вахта"):
             parts.append(_watch_duration_sentence(fact_map["вахта"]))
         if fact_map.get("график"):
@@ -70,12 +86,9 @@ def maybe_build_fact_answer(query: str, facts: list[dict]) -> str | None:
         parts: list[str] = []
 
         if asks_routine:
-            schedule = _routine_summary(fact_map)
-            food = _food_sentence(fact_map.get("завтрак с", ""))
-            if schedule:
-                parts.append(schedule)
-            if food:
-                parts.append(food)
+            routine = _routine_summary(fact_map)
+            if routine:
+                parts.append(routine)
         else:
             schedule = _schedule_summary(fact_map)
             if schedule:
@@ -169,7 +182,7 @@ def _capitalize_single_location(text: str) -> str:
 
 
 def _schedule_summary(fact_map: dict[str, str]) -> str:
-    parts: list[str] = []
+    pieces: list[str] = []
 
     work_cycle = fact_map.get("работаю")
     shift = fact_map.get("график") or fact_map.get("режим")
@@ -177,42 +190,46 @@ def _schedule_summary(fact_map: dict[str, str]) -> str:
     watch = fact_map.get("вахта")
 
     if work_cycle:
-        parts.append(f"У тебя вахта {work_cycle}")
-    if watch:
-        parts.append(f"сама вахта длится {watch}")
+        pieces.append(work_cycle)
     if shift:
-        parts.append(_shift_clause(shift))
+        pieces.append(_shift_clause(shift))
     if alternation:
-        parts.append(_watch_alternation_sentence(alternation, leading=False))
+        pieces.append(_watch_alternation_clause(alternation))
+    if watch:
+        pieces.append(f"сама вахта длится {watch}")
 
-    if not parts:
+    if not pieces:
         return ""
 
-    first, *rest = parts
-    sentence = first[:1].upper() + first[1:]
-    if rest:
-        sentence += ": " + ", ".join(rest)
-    return f"{sentence}."
+    return f"По графику у тебя {', '.join(pieces)}."
 
 
 def _routine_summary(fact_map: dict[str, str]) -> str:
-    parts: list[str] = []
+    pieces: list[str] = []
 
+    work_cycle = fact_map.get("работаю")
     shift = fact_map.get("график") or fact_map.get("режим")
     alternation = fact_map.get("одна вахта")
     watch = fact_map.get("вахта")
+    food = fact_map.get("завтрак с")
 
+    if work_cycle:
+        pieces.append(f"вахта {work_cycle}")
     if watch:
-        parts.append(f"вахта длится {watch}")
+        pieces.append(f"сама вахта длится {watch}")
     if shift:
-        parts.append(_shift_clause(shift))
+        pieces.append(_shift_clause(shift))
     if alternation:
-        parts.append(_watch_alternation_sentence(alternation, leading=False))
+        pieces.append(_watch_alternation_clause(alternation))
 
-    if not parts:
+    if not pieces and not food:
         return ""
 
-    return f"На работе у тебя {', '.join(parts)}."
+    text = f"На работе у тебя так: {', '.join(pieces)}."
+    food_sentence = _food_sentence(food or "")
+    if food_sentence:
+        text = f"{text} {food_sentence}"
+    return text.strip()
 
 
 def _watch_duration_sentence(value: str) -> str:
@@ -221,9 +238,7 @@ def _watch_duration_sentence(value: str) -> str:
 
 def _shift_duration_sentence(value: str) -> str:
     clause = _shift_clause(value)
-    if not clause:
-        return ""
-    return f"{clause[:1].upper()}{clause[1:]}."
+    return f"{clause[:1].upper()}{clause[1:]}." if clause else ""
 
 
 def _shift_clause(value: str) -> str:
@@ -231,13 +246,6 @@ def _shift_clause(value: str) -> str:
     if match:
         return f"смены по {match.group(0)}"
     return f"по смене у тебя {value}"
-
-
-def _watch_alternation_sentence(value: str, *, leading: bool = True) -> str:
-    clause = _watch_alternation_clause(value)
-    if leading:
-        return f"{clause[:1].upper()}{clause[1:]}"
-    return clause
 
 
 def _watch_alternation_clause(value: str) -> str:
