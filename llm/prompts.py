@@ -119,16 +119,47 @@ Good:
 """
 
 
-def build_system_prompt(memory_block: str, *, fact_answer_mode: bool = False) -> str:
+def _identity_context_block(*, bot_name: str | None = None, user_name: str | None = None) -> str:
+    lines: list[str] = []
+    if bot_name:
+        lines.append(
+            f'- The user explicitly assigned you the name "{bot_name}". '
+            "If the user asks your name or how to address you, answer with this exact name. "
+            "Do not insert it into unrelated replies."
+        )
+    if user_name:
+        lines.append(
+            f'- The user name is "{user_name}". '
+            "Use it only when directly relevant or when the user asks about their name."
+        )
+    if not lines:
+        return ""
+    return "Known identity facts:\n" + "\n".join(lines)
+
+
+def build_system_prompt(
+    memory_block: str,
+    *,
+    fact_answer_mode: bool = False,
+    bot_name: str | None = None,
+    user_name: str | None = None,
+) -> str:
     """Attach memory context to the base prompt when it exists."""
     sections = [
         BASE_SYSTEM,
         IDENTITY_RULES,
-        STYLE_RULES,
-        MEMORY_RULES,
-        INTERPRETATION_RULES,
-        CLARIFICATION_RULES,
     ]
+    identity_context = _identity_context_block(bot_name=bot_name, user_name=user_name)
+    if identity_context:
+        sections.append(identity_context)
+    sections.extend(
+        [
+            STYLE_RULES,
+            MEMORY_RULES,
+            INTERPRETATION_RULES,
+            CLARIFICATION_RULES,
+        ]
+    )
     if fact_answer_mode:
         sections.append(FACT_ANSWER_RULES)
     base_prompt = "\n\n".join(sections)

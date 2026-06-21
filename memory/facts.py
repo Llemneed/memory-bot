@@ -33,6 +33,12 @@ _TIME_MARKER = re.compile(
     r"\b(?:час|часа|часов|день|дня|дней|недел\w*|месяц|месяца|месяцев|год|года|лет|числа|смена|смены|смен)\b",
     re.IGNORECASE,
 )
+_BOT_NAME_PATTERNS = (
+    re.compile(r"\bтебя\s+зовут\s+(?P<value>[A-Za-zА-Яа-яЁё][\w-]*)", re.IGNORECASE),
+    re.compile(r"\bтебя\s+будут\s+звать\s+(?P<value>[A-Za-zА-Яа-яЁё][\w-]*)", re.IGNORECASE),
+    re.compile(r"\bбуду\s+звать\s+тебя\s+(?P<value>[A-Za-zА-Яа-яЁё][\w-]*)", re.IGNORECASE),
+    re.compile(r"\bтво[её]\s+имя(?:\s+(?:это|будет))?\s+(?P<value>[A-Za-zА-Яа-яЁё][\w-]*)", re.IGNORECASE),
+)
 _NAME = re.compile(r"\bменя\s+зовут\s+(?P<value>[A-ZА-ЯЁ][\w-]+)", re.IGNORECASE)
 _PREFERENCE = re.compile(
     r"^(?:(?:я\s+)?(?P<neg>не)\s+)?(?P<verb>люблю|нравит(?:ся|сь)|предпочитаю|обожаю|терпеть\s+не\s+могу|пью|ем)\s+(?P<value>[^.!?\n]+)$",
@@ -386,11 +392,12 @@ async def list_active_facts(
 
 
 def build_fact_block(facts: list[dict[str, Any]]) -> str:
-    if not facts:
+    visible_facts = [fact for fact in facts if not _is_prompt_hidden_fact(fact)]
+    if not visible_facts:
         return ""
 
     lines = ["=== Confirmed facts ==="]
-    for fact in facts:
+    for fact in visible_facts:
         lines.append(
             f"- [{fact['category']}] {_fact_label_for_display(fact['key'])}: {fact['value']}"
         )
@@ -399,11 +406,12 @@ def build_fact_block(facts: list[dict[str, Any]]) -> str:
 
 
 def build_fact_answer_block(facts: list[dict[str, Any]]) -> str:
-    if not facts:
+    visible_facts = [fact for fact in _prepare_fact_answer_facts(facts) if not _is_prompt_hidden_fact(fact)]
+    if not visible_facts:
         return ""
 
     lines = ["=== Facts for this answer ==="]
-    for fact in _prepare_fact_answer_facts(facts):
+    for fact in visible_facts:
         display_key = fact.get("_display_key") or fact["key"]
         lines.append(f"- {_fact_label_for_display(str(display_key))}: {fact['value']}")
     lines.append("=== End answer facts ===")
@@ -461,6 +469,10 @@ def _prepare_fact_answer_facts(facts: list[dict[str, Any]]) -> list[dict[str, An
             prepared_by_identity[identity] = candidate
 
     return [prepared_by_identity[identity] for identity in order]
+
+
+def _is_prompt_hidden_fact(fact: dict[str, Any]) -> bool:
+    return str(fact.get("category", "")) == "meta"
 
 
 def _canonicalize_fact_candidate(candidate: FactCandidate) -> FactCandidate:
@@ -611,6 +623,7 @@ def _fact_label_for_display(key: str) -> str:
 
 def _extract_clause_facts(text: str) -> list[FactCandidate | None]:
     for extractor in (
+        _extract_bot_name,
         _extract_name,
         _extract_preference,
         _extract_live_in,
@@ -731,7 +744,7 @@ def _looks_like_question(text: str) -> bool:
 
 def _looks_memory_worthy(text: str) -> bool:
     if _looks_like_second_person_address(text):
-        return False
+        return _looks_like_bot_naming(text)
 
     return (
         _FIRST_PERSON_PREFIX.search(text) is not None
@@ -745,6 +758,24 @@ def _looks_memory_worthy(text: str) -> bool:
 
 def _looks_like_correction_rejection(text: str) -> bool:
     return text.startswith("не ") and " а " in text
+
+
+def _extract_bot_name(text: str) -> FactCandidate | None:
+    for pattern in _BOT_NAME_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        value = _cleanup_value(match.group("value"))
+        if not value:
+            continue
+        return FactCandidate(
+            category="meta",
+            key="bot_name",
+            value=value,
+            source_text=text,
+            confidence=0.95,
+        )
+    return None
 
 
 def _extract_name(text: str) -> FactCandidate | None:
@@ -1065,6 +1096,10 @@ def _looks_like_topic_value(text: str) -> bool:
 
 def _looks_like_second_person_address(text: str) -> bool:
     return _SECOND_PERSON_PREFIX.search(text) is not None
+
+
+def _looks_like_bot_naming(text: str) -> bool:
+    return any(pattern.search(text) is not None for pattern in _BOT_NAME_PATTERNS)
 
 
 def _query_tokens(query: str) -> list[str]:

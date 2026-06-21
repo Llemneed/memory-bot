@@ -80,6 +80,16 @@ def _is_route_fact(fact: dict) -> bool:
     return key.startswith("маршрут") or key.endswith(":place")
 
 
+def _fact_value_by_key(facts: list[dict], key: str) -> str | None:
+    for fact in facts:
+        if str(fact.get("key", "")) != key:
+            continue
+        value = str(fact.get("value", "")).strip()
+        if value:
+            return value
+    return None
+
+
 def _shape_answer_text(answer: str, user_text: str) -> str:
     cleaned = answer.strip()
     if not cleaned or _user_wants_structured_reply(user_text):
@@ -303,12 +313,19 @@ async def handle_message(msg: Message) -> None:
 
     memory_parts = [fact_memory_block, raw_memory_block]
     memory_block = trim_retrieval_block("\n\n".join(part for part in memory_parts if part))
+    bot_name = _fact_value_by_key(direct_fact_hits, "bot_name")
+    user_name = _fact_value_by_key(direct_fact_hits, "имя")
     log.info(
         "ANSWER_MODE -> %s",
         "fact_llm_with_fallback" if direct_answer_fallback else "default_llm",
     )
     log.info("CONTEXT -> %s", memory_block)
-    system_prompt = build_system_prompt(memory_block, fact_answer_mode=bool(direct_answer_fallback))
+    system_prompt = build_system_prompt(
+        memory_block,
+        fact_answer_mode=bool(direct_answer_fallback),
+        bot_name=bot_name,
+        user_name=user_name,
+    )
     messages = trim_history(
         [{"role": "system", "content": system_prompt}] +
         history +
